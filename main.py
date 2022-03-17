@@ -32,14 +32,14 @@ def main():
     # Process
     seed_docs = torch.from_numpy(seed_docs_numpy)
     seed_label = torch.from_numpy(seed_label)
-    seed_docs = seed_docs.long()
+    # seed_docs = seed_docs.long()
     seed_label = seed_label.type(torch.FloatTensor)
     print('here')
 
 
     # Process data
-    train_data = DataWrapper(seed_docs, seed_label)
-    train_loader = DataLoader(dataset=train_data, batch_size=1, shuffle=True)   
+    # train_data = DataWrapper(seed_docs, seed_label)
+    # train_loader = DataLoader(dataset=train_data, batch_size=1, shuffle=True)   
 
     # Call model
     # wstc = WSTC(input_shape=xshape, n_classes=n_classes, model=argsmodel,

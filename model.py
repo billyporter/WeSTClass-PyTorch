@@ -4,13 +4,23 @@ import torch
 import torch.autograd as autograd
 from torch.nn import init
 import torch.optim as optim
-# from tqdm import tqdm
+from tqdm import tqdm
 from torch.utils.data import DataLoader
 from torch.autograd import Variable
-# from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score
 from time import time
 import copy, random
 
+class DataWrapper():
+    def __init__(self, x_data, y_data):
+        self.x = x_data
+        self.y = y_data
+
+    def __len__(self):
+        return len(self.x)
+
+    def __getitem__(self, index):
+        return self.x[index], self.y[index]
 
 class AttentionWithContext(nn.Module):
     def __init__(self):
@@ -107,7 +117,7 @@ class WSTC():
         self.input_shape = input_shape
         self.n_classes = n_classes
         self.model = self.classifier
-        self.optimizer = optim.Adam(self.classifier.parameters(), lr=0.0001)
+        self.optimizer = optim.Adam(self.classifier.parameters(), lr=0.001)
         self.criterion = nn.KLDivLoss(reduction='batchmean')
 
     def predict(self, x):
@@ -175,8 +185,7 @@ class WSTC():
             train_correct = 0
             train_total = 0
             loss_list = []
-            for i, (document, label) in enumerate(train_loader):
-                print(i)
+            for i, (document, label) in enumerate(tqdm(train_loader)):
                 train_total += 1
                 if self.is_cuda:
                     document = document.cuda()
@@ -198,7 +207,7 @@ class WSTC():
                 loss_list.append(local_loss)
 
                 if (i + 1) % 256 == 0 or (i + 1) == 2000:
-                    # print(i)
+
                     loss = sum(loss_list)
                     loss_list = []
 
@@ -230,7 +239,7 @@ class WSTC():
 
     
     def self_train(self, train_loader, x, y=None, maxiter=500, tol=0.1, power=2,
-                   update_interval=10, batch_size=64):
+                   update_interval=50, batch_size=256):
         print('a')
         pred, y_preds = self.predict(train_loader)
         print('b')
@@ -243,7 +252,7 @@ class WSTC():
 
         index = 0
         index_array = np.arange(x.shape[0])
-        for ite in range(int(maxiter)):
+        for ite in tqdm(range(int(maxiter))):
             if ite % update_interval == 0:
                 q, y_preds = self.predict(train_loader)
 
@@ -293,7 +302,7 @@ class WSTC():
         loss_list = []
         for i, (document, label) in enumerate(batch_train_loader):
             train_total += 1
-            if is_cuda:
+            if self.is_cuda:
                 document = document.cuda()
                 label = label.cuda()
             document = Variable(document)

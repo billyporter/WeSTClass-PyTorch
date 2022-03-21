@@ -1,8 +1,6 @@
 import numpy as np
 import torch.nn as nn
 import torch
-import torch.autograd as autograd
-from torch.nn import init
 import torch.optim as optim
 from tqdm import tqdm
 from torch.utils.data import DataLoader
@@ -10,69 +8,26 @@ from torch.autograd import Variable
 from sklearn.metrics import f1_score
 from time import time
 import copy, random
-
-class DataWrapper():
-    def __init__(self, x_data, y_data):
-        self.x = x_data
-        self.y = y_data
-
-    def __len__(self):
-        return len(self.x)
-
-    def __getitem__(self, index):
-        return self.x[index], self.y[index]
-
-class AttentionWithContext(nn.Module):
-    def __init__(self):
-        super(AttentionWithContext, self).__init__()
-
-        self.W = torch.nn.Parameter(torch.empty(100, 100))
-        self.u = torch.nn.Parameter(torch.empty(100, ))
-        torch.nn.init.normal_(self.W, std=0.01)
-        torch.nn.init.normal_(self.u, std=0.01)
-
-    def forward(self, x, mask=None):
-        uit = torch.matmul(x, self.W)
-
-        uit = torch.tanh(uit)
-        ait = torch.matmul(uit, self.u)
-
-        a = torch.exp(ait)
-
-        a = a / torch.sum(a, axis=1, keepdim=True) + 1e-7
-        a = a.unsqueeze(-1)
-        weighted_input = x * a
-
-        return torch.sum(weighted_input, axis=1)
-        
-
-class HierAttLayerEncoder(nn.Module):
-    def __init__(self, vocab_sz, embedding_dim, embedding_mat):
-        super(HierAttLayerEncoder, self).__init__()
-
-        self.emb_layer = nn.Embedding(vocab_sz, embedding_dim)
-        self.emb_layer.weights = torch.nn.Parameter(torch.from_numpy(embedding_mat))
-        self.l_lstm = nn.GRU(input_size=100, hidden_size=100, num_layers=2, bidirectional=True, batch_first=True)
-        self.l_dense = TimeDistributed(nn.Linear(in_features=200, out_features=100))
-        self.l_att = AttentionWithContext()
-
-    def forward(self, x):
-        embedded_sequences = self.emb_layer(x)
-        out, h = self.l_lstm(embedded_sequences)
-        out = self.l_dense(out)
-        out = self.l_att(out)
-        return out
+from layers import *
 
 
 class HierAttLayer(nn.Module):
     def __init__(self, vocab_sz, embedding_dim, embedding_mat):
         super(HierAttLayer, self).__init__()
-        self.encoder = HierAttLayerEncoder(vocab_sz, embedding_dim, embedding_mat)
+
+        # Encoder
+        self.encoder = HierAttLayerEncoder(vocab_sz, embedding_dim,
+                                           embedding_mat)
 
         # Decoder
         self.review_encoder = TimeDistributed(self.encoder)
-        self.l_lstm_sent = nn.GRU(input_size=100, hidden_size=100, num_layers=2, bidirectional=True, batch_first=True)
-        self.l_dense_sent = TimeDistributed(nn.Linear(in_features=200, out_features=100))
+        self.l_lstm_sent = nn.GRU(input_size=100,
+                                  hidden_size=100,
+                                  num_layers=2,
+                                  bidirectional=True,
+                                  batch_first=True)
+        self.l_dense_sent = TimeDistributed(
+            nn.Linear(in_features=200, out_features=100))
         self.l_att_sent = AttentionWithContext()
         self.l_linear = nn.Linear(in_features=100, out_features=4)
         self.softmax_layer = nn.LogSoftmax(dim=1)
@@ -102,12 +57,12 @@ class WSTC():
                  vocab_sz=None,
                  word_embedding_dim=100,
                  embedding_matrix=None,
-                 batch_size = 256,
-                 classifier = None
-                 ):
-        
+                 batch_size=256,
+                 classifier=None):
+
         self.batch_size = batch_size
-        self.classifier = HierAttLayer(vocab_sz, word_embedding_dim, embedding_matrix)
+        self.classifier = HierAttLayer(vocab_sz, word_embedding_dim,
+                                       embedding_matrix)
         self.is_cuda = torch.cuda.is_available()
         if classifier != None:
             self.classifier = classifier
@@ -117,7 +72,8 @@ class WSTC():
         self.input_shape = input_shape
         self.n_classes = n_classes
         self.model = self.classifier
-        self.optimizer = optim.Adam(self.classifier.parameters(), lr=0.001)
+        self.optimizer = optim.Adam(self.classifier.parameters(), lr=0.01)
+        # self.optimizer = optim.SGD(self.classifier.parameters(), lr=0.01, momentum=0.9)
         self.criterion = nn.KLDivLoss(reduction='batchmean')
 
     def predict(self, x):
@@ -141,46 +97,46 @@ class WSTC():
     def test_load_deprecated(self, test_loader):
         test_total = 0
         test_correct = 0
-        for i, (document, label) in enumerate(test_loader):
+        for i, (document, label) in enumerate(tqdm(test_loader)):
             test_total += 1
             if self.is_cuda:
                 document = document.cuda()
                 # label = label.cuda()
             # document = Variable(document)
-            print(document.shape)
 
             feature = self.classifier(document)
 
             # Get categorical target
-            # print(feature)
-            # print(label)
-            print().shape
             # num = torch.argmax(label.cpu())
             guess = torch.argmax(feature.cpu())
             num = label[0]
             # print(num)
             if guess == num:
                 test_correct += 1
-
+        print(test_correct / test_total)
 
         print('Test accuracy: {}'.format(test_correct / test_total))
 
     def target_distribution(self, q, power=2):
         # square each class, divide by total of class
-        weight = q ** power / q.sum(axis=0)
+        weight = q**power / q.sum(axis=0)
         p = (weight.T / weight.sum(axis=1)).T
         return p
 
-    def pretrain(self, train_loader):
-        epochs = 10
-        pretrain_output_file = open('pretrain_output.txt', 'w')
+    def pretrain(self,
+                 train_loader,
+                 epochs,
+                 output_save_path='pretrain_output.txt',
+                 model_save_path="model.pt"):
+        pretrain_output_file = open(output_save_path, 'w')
         t0 = time()
         best_dev_loss = None
         print('\nPretraining...')
         print('\nPretraining...', file=pretrain_output_file)
         for epoch in range(epochs):
             print('------EPOCH: ' + str(epoch) + '-------')
-            print('------EPOCH: ' + str(epoch) + '-------', file=pretrain_output_file)
+            print('------EPOCH: ' + str(epoch) + '-------',
+                  file=pretrain_output_file)
             train_loss = 0.
             train_correct = 0
             train_total = 0
@@ -192,7 +148,6 @@ class WSTC():
                     label = label.cuda()
                 document = Variable(document)
 
-
                 feature = self.classifier(document)
 
                 # Get categorical target
@@ -201,17 +156,16 @@ class WSTC():
                 if guess == num:
                     train_correct += 1
 
-
                 # Compute Loss
                 local_loss = self.criterion(feature, label)
                 loss_list.append(local_loss)
 
-                if (i + 1) % 256 == 0 or (i + 1) == 2000:
+                if (i + 1) % self.batch_size == 0 or (i + 1) == 2000:
 
                     loss = sum(loss_list)
                     loss_list = []
 
-                    # Clear gradient in optimizer 
+                    # Clear gradient in optimizer
                     self.optimizer.zero_grad()
                     loss.backward()
 
@@ -219,42 +173,52 @@ class WSTC():
                     self.optimizer.step()
                     train_loss += loss.item()
 
-
-            print('Epoch ({}) Train accuracy: {}'.format(epoch, train_correct / train_total))
+            print('Epoch ({}) Train accuracy: {}'.format(
+                epoch, train_correct / train_total))
             print('Epoch ({}) Train loss: {}'.format(epoch, train_loss))
-            print('Epoch ({}) Train accuracy: {}'.format(epoch, train_correct / train_total), file=pretrain_output_file)
-            print('Epoch ({}) Train loss: {}'.format(epoch, train_loss), file=pretrain_output_file)
-
+            print('Epoch ({}) Train accuracy: {}'.format(
+                epoch, train_correct / train_total),
+                  file=pretrain_output_file)
+            print('Epoch ({}) Train loss: {}'.format(epoch, train_loss),
+                  file=pretrain_output_file)
 
             if best_dev_loss is None or train_loss < best_dev_loss:
                 print('Saving...')
-                torch.save(self.classifier, "model")
+                torch.save(self.classifier, model_save_path)
                 best_dev_loss = train_loss
-
 
         # Close output file
         print('Pretraining time: {:.2f}s'.format(time() - t0))
-        print('Pretraining time: {:.2f}s'.format(time() - t0), file=pretrain_output_file)
+        print('Pretraining time: {:.2f}s'.format(time() - t0),
+              file=pretrain_output_file)
         pretrain_output_file.close()
 
-    
-    def self_train(self, train_loader, x, y=None, maxiter=500, tol=0.1, power=2,
-                   update_interval=50, batch_size=256):
+    def self_train(self,
+                   train_loader,
+                   x,
+                   y=None,
+                   maxiter=500,
+                   tol=0.1,
+                   power=2,
+                   update_interval=100,
+                   output_save_path='selftrain_output.txt',
+                   model_save_path="finetuned_model.pt"):
         print('a')
-        pred, y_preds = self.predict(train_loader)
+        q, y_preds = self.predict(train_loader)
         print('b')
         y_preds = np.asarray(y_preds)
         y_preds_last = np.copy(y_preds)
 
         # Open file
-        selftrain_file = open('selftrain_output.txt', 'w')
+        selftrain_file = open(output_save_path, 'w')
         t0 = time()
 
         index = 0
         index_array = np.arange(x.shape[0])
         for ite in tqdm(range(int(maxiter))):
             if ite % update_interval == 0:
-                q, y_preds = self.predict(train_loader)
+                if ite != 0:
+                    q, y_preds = self.predict(train_loader)
 
                 y_preds = np.asarray(y_preds)
                 q = np.asarray(q)
@@ -263,39 +227,56 @@ class WSTC():
                 print('\nIter {}: '.format(ite), end='', file=selftrain_file)
                 if y is not None:
                     f1_macro, f1_micro = np.round(f1(y, y_preds), 5)
-                    print('f1_macro = {}, f1_micro = {}'.format(f1_macro, f1_micro))
-                    print('f1_macro = {}, f1_micro = {}'.format(f1_macro, f1_micro), file=selftrain_file)
+                    print('f1_macro = {}, f1_micro = {}'.format(
+                        f1_macro, f1_micro))
+                    print('f1_macro = {}, f1_micro = {}'.format(
+                        f1_macro, f1_micro),
+                          file=selftrain_file)
                     # test_load_deprecated()
 
                 # Check stop criterion
-                delta_label = np.sum(y_preds != y_preds_last).astype(float) / y_preds.shape[0]
+                delta_label = np.sum(
+                    y_preds != y_preds_last).astype(float) / y_preds.shape[0]
                 y_preds_last = np.copy(y_preds)
-                print('Fraction of documents with label changes: {} %'.format(np.round(delta_label*100, 3)))
-                print('Fraction of documents with label changes: {} %'.format(np.round(delta_label*100, 3)), file=selftrain_file)
-                if ite > 0 and delta_label < tol/100:
-                    print('\nFraction: {} % < tol: {} %'.format(np.round(delta_label*100, 3), tol))
+                print('Fraction of documents with label changes: {} %'.format(
+                    np.round(delta_label * 100, 3)))
+                print('Fraction of documents with label changes: {} %'.format(
+                    np.round(delta_label * 100, 3)),
+                      file=selftrain_file)
+                if ite > 0 and delta_label < tol / 100:
+                    print('\nFraction: {} % < tol: {} %'.format(
+                        np.round(delta_label * 100, 3), tol))
                     print('Reached tolerance threshold. Stopping training.')
-                    print('\nFraction: {} % < tol: {} %'.format(np.round(delta_label*100, 3), tol), file=selftrain_file)
-                    print('Reached tolerance threshold. Stopping training.', file=selftrain_file)
+                    print('\nFraction: {} % < tol: {} %'.format(
+                        np.round(delta_label * 100, 3), tol),
+                          file=selftrain_file)
+                    print('Reached tolerance threshold. Stopping training.',
+                          file=selftrain_file)
                     print('Saving...')
-                    torch.save(self.classifier, "finetuned_model")
+                    torch.save(self.classifier, model_save_path)
                     break
 
             # Train on a singular batch
-            idx = index_array[index * batch_size: min((index+1) * batch_size, x.shape[0])]
+            idx = index_array[index *
+                              self.batch_size:min((index + 1) *
+                                                  self.batch_size, x.shape[0])]
 
             self.train_on_batch(x=x[idx], y=p[idx])
 
-            index = index + 1 if (index + 1) * batch_size <= x.shape[0] else 0
+            index = index + 1 if (index +
+                                  1) * self.batch_size <= x.shape[0] else 0
 
         # Close output file
         print('Pretraining time: {:.2f}s'.format(time() - t0))
-        print('Pretraining time: {:.2f}s'.format(time() - t0), file=selftrain_file)
+        print('Pretraining time: {:.2f}s'.format(time() - t0),
+              file=selftrain_file)
         selftrain_file.close()
 
     def train_on_batch(self, x, y):
         batch_data = DataWrapper(x, y)
-        batch_train_loader = DataLoader(dataset=batch_data, batch_size=1, shuffle=False)
+        batch_train_loader = DataLoader(dataset=batch_data,
+                                        batch_size=1,
+                                        shuffle=False)
         train_loss = 0.
         train_correct = 0
         train_total = 0
@@ -307,7 +288,6 @@ class WSTC():
                 label = label.cuda()
             document = Variable(document)
 
-
             feature = self.classifier(document)
 
             # Get categorical target
@@ -316,14 +296,13 @@ class WSTC():
             if guess == num:
                 train_correct += 1
 
-
             # Compute Loss
             loss_list.append(self.criterion(feature, label))
 
         loss = sum(loss_list)
         loss_list = []
 
-        # Clear gradient in optimizer 
+        # Clear gradient in optimizer
         self.optimizer.zero_grad()
         loss.backward()
 
@@ -331,32 +310,10 @@ class WSTC():
         self.optimizer.step()
         train_loss += loss.item()
 
+
 def f1(y_true, y_pred):
     y_true = y_true.astype(np.int64)
     assert y_pred.size == y_true.size
     f1_macro = f1_score(y_true, y_pred, average='macro')
     f1_micro = f1_score(y_true, y_pred, average='micro')
     return f1_macro, f1_micro
-
-
-class TimeDistributed(nn.Module):
-    def __init__(self, module, batch_first=True):
-        super(TimeDistributed, self).__init__()
-        self.module = module
-        self.batch_first = batch_first
-
-    def forward(self, x):
-        if len(x.size()) <= 2:
-            return self.module(x)
-        # Squash samples and timesteps into a single axis
-        x_reshape = x.contiguous().view(-1, x.size(-1))  # (samples * timesteps, input_size)
-
-        y = self.module(x_reshape)
-
-        # We have to reshape Y
-        if self.batch_first:
-            y = y.contiguous().view(x.size(0), -1, y.size(-1))  # (samples, timesteps, output_size)
-        else:
-            y = y.view(-1, x.size(1), y.size(-1))  # (timesteps, samples, output_size)
-
-        return y

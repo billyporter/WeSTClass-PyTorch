@@ -20,7 +20,7 @@ class HierAttLayer(nn.Module):
                                            embedding_mat)
 
         # Decoder
-        self.review_encoder = TimeDistributed(self.encoder)
+        self.review_encoder = TimeDistributed(TimeDistributed(self.encoder))
         self.l_lstm_sent = nn.GRU(input_size=100,
                                   hidden_size=100,
                                   num_layers=2,
@@ -33,9 +33,7 @@ class HierAttLayer(nn.Module):
         self.softmax_layer = nn.LogSoftmax(dim=1)
 
     def forward(self, x):
-        x = x.squeeze()
         x = self.review_encoder(x)
-        x = x.unsqueeze(0)
         x, h = self.l_lstm_sent(x)
         x = self.l_dense_sent(x)
         x = self.l_att_sent(x)
@@ -87,35 +85,26 @@ class WSTC():
 
             # document = Variable(document)
             pred = self.model(document)
+            preds_numpy = torch.exp(pred).cpu().detach().numpy()
+            guesses = torch.argmax(pred.cpu(), dim=1)
+            q_list.extend(preds_numpy)
+            preds_list.extend(guesses)
 
-            # here i detach it, it is very likely that i might need to be tensors
-            q_list.append(torch.exp(pred).cpu().detach().numpy()[0])
-            guess = torch.argmax(pred.cpu())
-            preds_list.append(guess)
         return q_list, preds_list
 
-    def test_load_deprecated(self, test_loader):
+    def evaluate_dataset(self, test_loader):
         test_total = 0
         test_correct = 0
         for i, (document, label) in enumerate(tqdm(test_loader)):
-            test_total += 1
             if self.is_cuda:
                 document = document.cuda()
-                # label = label.cuda()
-            # document = Variable(document)
 
             feature = self.classifier(document)
 
             # Get categorical target
-            # num = torch.argmax(label.cpu())
-            guess = torch.argmax(feature.cpu())
-            num = label[0]
-            # print(num)
-            if guess == num:
-                test_correct += 1
-        print(test_correct / test_total)
+            test_correct += binary_accuracy(feature.cpu().detach(), label.cpu().detach())
 
-        print('Test accuracy: {}'.format(test_correct / test_total))
+        print('Test accuracy: {}'.format(test_correct / len(test_total.dataset))
 
     def target_distribution(self, q, power=2):
         # square each class, divide by total of class
@@ -139,10 +128,7 @@ class WSTC():
                   file=pretrain_output_file)
             train_loss = 0.
             train_correct = 0
-            train_total = 0
-            loss_list = []
             for i, (document, label) in enumerate(tqdm(train_loader)):
-                train_total += 1
                 if self.is_cuda:
                     document = document.cuda()
                     label = label.cuda()
@@ -151,36 +137,23 @@ class WSTC():
                 feature = self.classifier(document)
 
                 # Get categorical target
-                num = torch.argmax(label.cpu())
-                guess = torch.argmax(feature.cpu())
-                if guess == num:
-                    train_correct += 1
+                train_correct += binary_accuracy(feature.cpu().detach(), label.cpu().detach())
 
                 # Compute Loss
-                local_loss = self.criterion(feature, label)
-                loss_list.append(local_loss)
+                loss = self.criterion(feature, label)
 
-                if (i + 1) % self.batch_size == 0 or (i + 1) == 2000:
+                # Clear gradient in optimizer
+                self.optimizer.zero_grad()
+                train_loss.backward()
 
-                    loss = sum(loss_list)
-                    loss_list = []
+                # Do one step of gradient descent
+                self.optimizer.step()
+                train_loss += loss.item()
 
-                    # Clear gradient in optimizer
-                    self.optimizer.zero_grad()
-                    loss.backward()
-
-                    # Do one step of gradient descent
-                    self.optimizer.step()
-                    train_loss += loss.item()
-
-            print('Epoch ({}) Train accuracy: {}'.format(
-                epoch, train_correct / train_total))
+            print('Epoch ({}) Train accuracy: {}'.format(epoch, train_correct / len(train_loader.dataset)))
             print('Epoch ({}) Train loss: {}'.format(epoch, train_loss))
-            print('Epoch ({}) Train accuracy: {}'.format(
-                epoch, train_correct / train_total),
-                  file=pretrain_output_file)
-            print('Epoch ({}) Train loss: {}'.format(epoch, train_loss),
-                  file=pretrain_output_file)
+            print('Epoch ({}) Train accuracy: {}'.format(epoch, train_correct / len(train_loader.dataset)), file=pretrain_output_file)
+            print('Epoch ({}) Train loss: {}'.format(epoch, train_loss), file=pretrain_output_file)
 
             if best_dev_loss is None or train_loss < best_dev_loss:
                 print('Saving...')
@@ -203,9 +176,8 @@ class WSTC():
                    update_interval=100,
                    output_save_path='selftrain_output.txt',
                    model_save_path="finetuned_model.pt"):
-        print('a')
+
         q, y_preds = self.predict(train_loader)
-        print('b')
         y_preds = np.asarray(y_preds)
         y_preds_last = np.copy(y_preds)
 
@@ -227,62 +199,45 @@ class WSTC():
                 print('\nIter {}: '.format(ite), end='', file=selftrain_file)
                 if y is not None:
                     f1_macro, f1_micro = np.round(f1(y, y_preds), 5)
-                    print('f1_macro = {}, f1_micro = {}'.format(
-                        f1_macro, f1_micro))
-                    print('f1_macro = {}, f1_micro = {}'.format(
-                        f1_macro, f1_micro),
-                          file=selftrain_file)
+                    print('f1_macro = {}, f1_micro = {}'.format(f1_macro, f1_micro))
+                    print('f1_macro = {}, f1_micro = {}'.format(f1_macro, f1_micro), file=selftrain_file)
                     # test_load_deprecated()
 
                 # Check stop criterion
                 delta_label = np.sum(
                     y_preds != y_preds_last).astype(float) / y_preds.shape[0]
                 y_preds_last = np.copy(y_preds)
-                print('Fraction of documents with label changes: {} %'.format(
-                    np.round(delta_label * 100, 3)))
-                print('Fraction of documents with label changes: {} %'.format(
-                    np.round(delta_label * 100, 3)),
-                      file=selftrain_file)
+                print('Fraction of documents with label changes: {} %'.format(np.round(delta_label * 100, 3)))
+                print('Fraction of documents with label changes: {} %'.format(np.round(delta_label * 100, 3)), file=selftrain_file)
                 if ite > 0 and delta_label < tol / 100:
-                    print('\nFraction: {} % < tol: {} %'.format(
-                        np.round(delta_label * 100, 3), tol))
+                    print('\nFraction: {} % < tol: {} %'.format(np.round(delta_label * 100, 3), tol))
+                    print('\nFraction: {} % < tol: {} %'.format(np.round(delta_label * 100, 3), tol),file=selftrain_file)
                     print('Reached tolerance threshold. Stopping training.')
-                    print('\nFraction: {} % < tol: {} %'.format(
-                        np.round(delta_label * 100, 3), tol),
-                          file=selftrain_file)
-                    print('Reached tolerance threshold. Stopping training.',
-                          file=selftrain_file)
+                    print('Reached tolerance threshold. Stopping training.',file=selftrain_file)
                     print('Saving...')
                     torch.save(self.classifier, model_save_path)
                     break
 
             # Train on a singular batch
-            idx = index_array[index *
-                              self.batch_size:min((index + 1) *
-                                                  self.batch_size, x.shape[0])]
+            idx = index_array[index * self.batch_size:min((index + 1) * self.batch_size, x.shape[0])]
 
-            self.train_on_batch(x=x[idx], y=p[idx])
+            self.train_on_batch(x=x[idx], y=p[idx], batch_size=self.batch_size)
 
-            index = index + 1 if (index +
-                                  1) * self.batch_size <= x.shape[0] else 0
+            index = index + 1 if (index + 1) * self.batch_size <= x.shape[0] else 0
 
         # Close output file
         print('Pretraining time: {:.2f}s'.format(time() - t0))
-        print('Pretraining time: {:.2f}s'.format(time() - t0),
-              file=selftrain_file)
+        print('Pretraining time: {:.2f}s'.format(time() - t0), file=selftrain_file)
         selftrain_file.close()
 
-    def train_on_batch(self, x, y):
+    def train_on_batch(self, x, y, batch_size):
         batch_data = DataWrapper(x, y)
         batch_train_loader = DataLoader(dataset=batch_data,
-                                        batch_size=1,
+                                        batch_size=batch_size,
                                         shuffle=False)
         train_loss = 0.
         train_correct = 0
-        train_total = 0
-        loss_list = []
         for i, (document, label) in enumerate(batch_train_loader):
-            train_total += 1
             if self.is_cuda:
                 document = document.cuda()
                 label = label.cuda()
@@ -291,24 +246,18 @@ class WSTC():
             feature = self.classifier(document)
 
             # Get categorical target
-            num = torch.argmax(label.cpu())
-            guess = torch.argmax(feature.cpu())
-            if guess == num:
-                train_correct += 1
+            train_correct += binary_accuracy(feature.cpu().detach(), label.cpu().detach())
 
             # Compute Loss
-            loss_list.append(self.criterion(feature, label))
+            loss = self.criterion(feature, label)
 
-        loss = sum(loss_list)
-        loss_list = []
+            # Clear gradient in optimizer
+            self.optimizer.zero_grad()
+            loss.backward()
 
-        # Clear gradient in optimizer
-        self.optimizer.zero_grad()
-        loss.backward()
-
-        # Do one step of gradient descent
-        self.optimizer.step()
-        train_loss += loss.item()
+            # Do one step of gradient descent
+            self.optimizer.step()
+            train_loss += loss.item()
 
 
 def f1(y_true, y_pred):
@@ -317,3 +266,9 @@ def f1(y_true, y_pred):
     f1_macro = f1_score(y_true, y_pred, average='macro')
     f1_micro = f1_score(y_true, y_pred, average='micro')
     return f1_macro, f1_micro
+
+def binary_accuracy(preds, y):
+    preds = torch.argmax(preds, dim=1)
+    y = torch.argmax(y, dim=1)
+    count = torch.sum(preds == y)
+    return count

@@ -33,7 +33,7 @@ def main():
 
     ### Training Settings ###
     # mini-batch size for both pre-training and self-training: 256 (default)
-    parser.add_argument('--batch_size', default=6, type=int)
+    parser.add_argument('--batch_size', default=256, type=int)
     # maximum self-training iterations: 5000 (default)
     parser.add_argument('--maxiter', default=5e3, type=int)
     # pre-training epochs: None (default)

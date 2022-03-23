@@ -33,7 +33,7 @@ def main():
 
     ### Training Settings ###
     # mini-batch size for both pre-training and self-training: 256 (default)
-    parser.add_argument('--batch_size', default=256, type=int)
+    parser.add_argument('--batch_size', default=6, type=int)
     # maximum self-training iterations: 5000 (default)
     parser.add_argument('--maxiter', default=5e3, type=int)
     # pre-training epochs: None (default)
@@ -63,9 +63,10 @@ def main():
 
         # Process data
         train_data = DataWrapper(seed_docs, seed_label)
-        train_loader = DataLoader(dataset=train_data,
-                                  batch_size=1,
-                                  shuffle=True)
+        train_loader = DataLoader(dataset=train_data, batch_size=256, shuffle=True)
+        # for doc, label in train_loader:
+        #     print(doc.shape)
+        #     return
 
         # Call model
         wstc = WSTC(input_shape=xshape,
@@ -85,12 +86,12 @@ def main():
         model = torch.load('model.pt')
 
         # # Load data
-        y = np.load('new_new_y.npy')
-        x = np.load('new_new_x.npy')
+        y = np.load('new_y.npy')
+        x = np.load('new_x.npy')
         # print(x.shape)
         train_data = DataWrapper(x, y)
         self_train_loader = DataLoader(dataset=train_data,
-                                       batch_size=1,
+                                       batch_size=args.batch_size,
                                        shuffle=False)
 
         # Call self training
@@ -116,12 +117,12 @@ def main():
 
         # Load data
         # model = None
-        y = np.load('new_new_y.npy')
-        x = np.load('new_new_x.npy')
+        y = np.load('new_y.npy')
+        x = np.load('new_x.npy')
 
         test_data = DataWrapper(x, y)
         test_loader = DataLoader(dataset=test_data,
-                                 batch_size=1,
+                                 batch_size=args.batch_size,
                                  shuffle=False)
 
         wstc = WSTC(input_shape=xshape,
@@ -133,7 +134,7 @@ def main():
                     embedding_matrix=embedding_mat,
                     word_embedding_dim=word_embedding_dim)
 
-        wstc.test_load_deprecated(test_loader)
+        wstc.evaluate_dataset(test_loader)
 
 
 if __name__ == "__main__":

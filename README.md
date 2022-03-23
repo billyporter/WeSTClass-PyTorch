@@ -5,7 +5,7 @@ Weakly-Supervised Neural Tex Classification
 
 
 ## General Summary
-### Pseudodocument Generation
+### Pseudo Document Generation
 Given a corpus containing documents with N classes, we aim to generate pseudo-documents to be used for model pretraining. First, we construct word embeddings for the entire voacbulary of words. Next, we use a few user provided keywords for each class and select the top-t words that have embeddings most similar to the key words. "t" is constructed to be the maximum integer such that the classes do not have any overlaps in words. With the selected keywords, we fit the embeddings to a unit sphere and repeatedly sample the words to generate pseudo documents (~500 per class). Finally, we construct loosely fitted pseudo labels (for 4-classes, we use a label of 0.85 for the class the psuedo document belongs to and 0.05 for the other three classes, rather than using a one hot encoding in order to avoid the neural model from overfittting on the pseudo documents
 
 ### Neural Model

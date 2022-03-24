@@ -28,8 +28,7 @@ def main():
     parser.add_argument("-m",
                         "--method",
                         choices=["p", "s", "e"],
-                        help="p: pretrain\ns: self-train\ne: eval",
-                        default="p")
+                        help="p: pretrain\ns: self-train\ne: eval")
 
     ### Training Settings ###
     # mini-batch size for both pre-training and self-training: 256 (default)
@@ -37,10 +36,23 @@ def main():
     # maximum self-training iterations: 5000 (default)
     parser.add_argument('--maxiter', default=5e3, type=int)
     # pre-training epochs: None (default)
-    parser.add_argument('--pretrain_epochs', default=200, type=int)
+    parser.add_argument('--pretrain_epochs', default=50, type=int)
     # self-training update interval: None (default)
-    parser.add_argument('--update_interval', default=100, type=int)
+    parser.add_argument('--update_interval', default=50, type=int)
+    # data source (truncated or full, default full)
+    parser.add_argument('--data', 
+                        choices=["full", "trunc"],
+                        default="full",
+                        help="p: pretrain\ns: self-train\ne: eval")
     args = parser.parse_args()
+
+    ### Data
+    docs_path           = "data/real_docs_full.npy"
+    labels_path         = "data/real_labels_full.npy"
+    if args.data == "trunc":
+        docs_path       = "data/real_docs_trunc.npy"
+        labels_path     = "data/real_labels_trunc.npy"
+
 
     ### Constants ###
     xshape = (12000, 10, 45)
@@ -48,13 +60,13 @@ def main():
     argsmodel = 'rnn'
     vocab_sz = 67765
     word_embedding_dim = 100
-    embedding_mat = np.load('embedding_mat.npy')
+    embedding_mat = np.load('data/embedding_mat.npy')
 
     ### Pretrain ###
     if args.method == 'p':
         # Load data
-        seed_docs_numpy = np.load('seed_docs.npy')
-        seed_label = np.load('seed_label.npy')
+        seed_docs_numpy = np.load('data/seed_docs.npy')
+        seed_label = np.load('data/seed_label.npy')
 
         # Process
         seed_docs = torch.from_numpy(seed_docs_numpy)
@@ -64,9 +76,6 @@ def main():
         # Process data
         train_data = DataWrapper(seed_docs, seed_label)
         train_loader = DataLoader(dataset=train_data, batch_size=256, shuffle=True)
-        # for doc, label in train_loader:
-        #     print(doc.shape)
-        #     return
 
         # Call model
         wstc = WSTC(input_shape=xshape,
@@ -86,8 +95,8 @@ def main():
         model = torch.load('model.pt')
 
         # # Load data
-        y = np.load('new_y.npy')
-        x = np.load('new_x.npy')
+        x = np.load(docs_path)
+        y = np.load(labels_path)
         # print(x.shape)
         train_data = DataWrapper(x, y)
         self_train_loader = DataLoader(dataset=train_data,
@@ -117,8 +126,8 @@ def main():
 
         # Load data
         # model = None
-        y = np.load('new_y.npy')
-        x = np.load('new_x.npy')
+        x = np.load(docs_path)
+        y = np.load(labels_path)
 
         test_data = DataWrapper(x, y)
         test_loader = DataLoader(dataset=test_data,

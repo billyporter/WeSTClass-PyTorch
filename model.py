@@ -92,19 +92,35 @@ class WSTC():
 
         return q_list, preds_list
 
-    def evaluate_dataset(self, test_loader):
-        test_total = 0
+    def evaluate_dataset(self, test_loader, get_stats=False):
         test_correct = 0
+        confidence_list = []
+        preds_list = []
+        actual_list = []
         for i, (document, label) in enumerate(tqdm(test_loader)):
             if self.is_cuda:
                 document = document.cuda()
 
             feature = self.classifier(document)
-
             # Get categorical target
-            test_correct += binary_accuracy(feature.cpu().detach(), label.cpu().detach())
+            if get_stats:
+                scores, indices = confidence_correct(torch.exp(feature).cpu().detach(), label.cpu().detach())
+                scores = scores.tolist()
+                indices = indices.tolist()
+                confidence_list.extend(scores)
+                preds_list.extend(indices)
+                actual_list.extend(label.tolist())
+            
+            test_correct += binary_accuracy(feature.cpu().detach(), label.cpu().detach(), method="eval")
 
-        print('Test accuracy: {}'.format(test_correct / len(test_total.dataset))
+        print('Test accuracy: {}'.format(test_correct / len(test_loader.dataset)))
+
+        # Write confdience and booleans to file
+        if get_stats:
+            np.save("confidence_array.npy", np.asarray(confidence_list))
+            np.save("preds_array.npy", np.asarray(preds_list))
+            np.save("actual_array.npy", np.asarray(actual_list))
+
 
     def target_distribution(self, q, power=2):
         # square each class, divide by total of class
@@ -137,22 +153,22 @@ class WSTC():
                 feature = self.classifier(document)
 
                 # Get categorical target
-                train_correct += binary_accuracy(feature.cpu().detach(), label.cpu().detach())
+                train_correct += binary_accuracy(feature.cpu().detach(), label.cpu().detach(), method="train")
 
                 # Compute Loss
                 loss = self.criterion(feature, label)
 
                 # Clear gradient in optimizer
                 self.optimizer.zero_grad()
-                train_loss.backward()
+                loss.backward()
 
                 # Do one step of gradient descent
                 self.optimizer.step()
                 train_loss += loss.item()
 
             print('Epoch ({}) Train accuracy: {}'.format(epoch, train_correct / len(train_loader.dataset)))
-            print('Epoch ({}) Train loss: {}'.format(epoch, train_loss))
             print('Epoch ({}) Train accuracy: {}'.format(epoch, train_correct / len(train_loader.dataset)), file=pretrain_output_file)
+            print('Epoch ({}) Train loss: {}'.format(epoch, train_loss))
             print('Epoch ({}) Train loss: {}'.format(epoch, train_loss), file=pretrain_output_file)
 
             if best_dev_loss is None or train_loss < best_dev_loss:
@@ -267,8 +283,14 @@ def f1(y_true, y_pred):
     f1_micro = f1_score(y_true, y_pred, average='micro')
     return f1_macro, f1_micro
 
-def binary_accuracy(preds, y):
+def binary_accuracy(preds, y, method="train"):
     preds = torch.argmax(preds, dim=1)
-    y = torch.argmax(y, dim=1)
+    if method == "train":
+        y = torch.argmax(y, dim=1)
     count = torch.sum(preds == y)
     return count
+
+def confidence_correct(preds, y, method="eval"):
+    max_value = torch.max(preds, dim=1)
+    score, indices = max_value
+    return score, indices

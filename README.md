@@ -26,7 +26,10 @@ optional arguments:\
   &nbsp; --batch_size BATCH_SIZE\
   &nbsp; --maxiter MAXITER\
   &nbsp; --pretrain_epochs PRETRAIN_EPOCHS\
-  &nbsp; --update_interval UPDATE_INTERVAL
+  &nbsp; --update_interval UPDATE_INTERVAL\
+ &nbsp;  --data {full, trunc}, DATA \
+                        &emsp; &emsp; &emsp; &emsp; &emsp; &emsp; &emsp; &emsp; full: full 120,000 documents\
+                        &emsp; &emsp; &emsp; &emsp; &emsp; &emsp; &emsp; &emsp; trunc: 2,000 documents
 
 
 ## Requirements

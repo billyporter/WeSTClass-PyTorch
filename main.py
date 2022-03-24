@@ -42,13 +42,14 @@ def main():
     # data source (truncated or full, default full)
     parser.add_argument('--data', 
                         choices=["full", "trunc"],
-                        default="full",
-                        help="p: pretrain\ns: self-train\ne: eval")
+                        default="trunc",
+                        help="full: full 120,000 documents\ntrunc: 2,000 documents")
     args = parser.parse_args()
 
     ### Data
     docs_path           = "data/real_docs_full.npy"
     labels_path         = "data/real_labels_full.npy"
+
     if args.data == "trunc":
         docs_path       = "data/real_docs_trunc.npy"
         labels_path     = "data/real_labels_trunc.npy"

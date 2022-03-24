@@ -1,6 +1,6 @@
 # WeSTClass-PyTorch
 PyTorch Implementation of WeSTClass
-Weakly-Supervised Neural Tex Classification
+Weakly-Supervised Neural Text Classification
 [http://chaozhang.org/papers/2018-cikm-westclass.pdf](http://chaozhang.org/papers/2018-cikm-westclass.pdf)
 
 

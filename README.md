@@ -12,6 +12,23 @@ Given a corpus containing documents with N classes, we aim to generate pseudo-do
 Given the pseudo documents and their pseudo labels, we pretrain a Hierarchical Attention Network (HAN) based on word and sentence level attention with a RNN. After pre-training the model, we perform a self training loop that functions as follows. First, we make class predictions for each real document. For every iteration, we train the neural model on a batch of the real documents coupled with labels computed from a common self-training formula based on the soft frequency of each class. After every N iterations, we re-predict the classes and evaluate what percentage of the predictions changes. If that percentage is smaller than a given threshold, we terminate self-training.
 
 
+## Usage
+usage: main.py [-h] [-m {p,s,e}] [--batch_size BATCH_SIZE] [--maxiter MAXITER]\
+               &emsp; &emsp; &emsp; [--pretrain_epochs PRETRAIN_EPOCHS]\
+               &emsp; &emsp; &emsp; [--update_interval UPDATE_INTERVAL]
+
+optional arguments:\
+  &nbsp; -h, --help            &emsp; &emsp; show this help message and exit\
+  &nbsp; -m {p,s,e}, --method {p,s,e}\
+                        &emsp; &emsp; &emsp; &emsp; &emsp; &emsp; &emsp; &emsp; p: pretrain\
+                        &emsp; &emsp; &emsp; &emsp; &emsp; &emsp; &emsp; &emsp; s: self-train\
+                        &emsp; &emsp; &emsp; &emsp; &emsp; &emsp; &emsp; &emsp; e: eval\
+  &nbsp; --batch_size BATCH_SIZE\
+  &nbsp; --maxiter MAXITER\
+  &nbsp; --pretrain_epochs PRETRAIN_EPOCHS\
+  &nbsp; --update_interval UPDATE_INTERVAL
+
+
 ## Requirements
 - Numpy Version: 1.21.5
 - PyTorch Version: 1.10.0+cu111

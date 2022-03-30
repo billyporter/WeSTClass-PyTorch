@@ -113,7 +113,7 @@ def main():
 
         # Process data
         train_data = DataWrapper(seed_docs, seed_label)
-        train_loader = DataLoader(dataset=train_data, batch_size=256, shuffle=True)
+        train_loader = DataLoader(dataset=train_data, batch_size=args.batch_size, shuffle=True)
 
         # Call model
         wstc = WSTC(input_shape=xshape,

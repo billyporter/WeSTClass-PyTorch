@@ -33,18 +33,28 @@ class HierAttLayer(nn.Module):
         self.softmax_layer = nn.LogSoftmax(dim=1)
 
     def forward(self, x):
+        # output_list = []
+        # for i in x:
+        #     output, h = self.encoder(i)
+        #     print(output.shape)
+        #     output_list.append(output)
+        # print(output_list)
+        # x = torch.cat(output_list, 0)
+        print(x.shape)
         x = self.review_encoder(x)
+        print(x.shape)
         x, h = self.l_lstm_sent(x)
+        print().shape
         x = self.l_dense_sent(x)
         x = self.l_att_sent(x)
         x = self.l_linear(x)
         x = self.softmax_layer(x)
         return x
 
-    def init_hidden(self, batch_size=1):
-        weight = next(self.parameters()).data
-        hidden = weight.new(2, batch_size, 100).zero_()
-        return hidden
+    def _init_hidden_state(self, batch_size):
+        # self.sent_hidden_state = torch.zeros(2, batch_size, )
+        pass
+        # return hidden
 
 
 class WSTC():

@@ -27,7 +27,7 @@ def main():
     ### Basic Settings ###
     parser.add_argument("-m",
                         "--method",
-                        choices=["p", "s", "e"],
+                        choices=["p", "s", "e", "a"],
                         help="p: pretrain\ns: self-train\ne: eval")
 
     ### Training Settings ###
@@ -61,11 +61,48 @@ def main():
     argsmodel = 'rnn'
     vocab_sz = 67765
     word_embedding_dim = 100
+    print('here')
     embedding_mat = np.load('data/embedding_mat.npy')
+
+    if args.method == 'a':
+        seed_docs_numpy = np.load('data/seed_docs.npy')
+        seed_label = np.load('data/seed_label.npy')
+
+        # Process
+        seed_docs = torch.from_numpy(seed_docs_numpy)
+        seed_label = torch.from_numpy(seed_label)
+        seed_label = seed_label.type(torch.FloatTensor)
+
+        # Process data
+        train_data = DataWrapper(seed_docs, seed_label)
+        train_loader = DataLoader(dataset=train_data, batch_size=args.batch_size, shuffle=True)
+
+        # Call model
+        wstc = WSTC(input_shape=xshape,
+                    n_classes=n_classes,
+                    model=argsmodel,
+                    batch_size=args.batch_size,
+                    vocab_sz=vocab_sz,
+                    embedding_matrix=embedding_mat,
+                    word_embedding_dim=word_embedding_dim)
+
+        # # Load data
+        x = np.load(docs_path)
+        y = np.load(labels_path)
+        # print(x.shape)
+        train_data = DataWrapper(x, y)
+        self_train_loader = DataLoader(dataset=train_data,
+                                       batch_size=args.batch_size,
+                                       shuffle=False)
+
+
+        wstc.pretrain_with_test(train_loader, args.pretrain_epochs, self_train_loader)
+
 
     ### Pretrain ###
     if args.method == 'p':
         # Load data
+        print('here')
         seed_docs_numpy = np.load('data/seed_docs.npy')
         seed_label = np.load('data/seed_label.npy')
 

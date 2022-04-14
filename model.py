@@ -15,36 +15,36 @@ class HierAttLayer(nn.Module):
     def __init__(self, vocab_sz, embedding_dim, embedding_mat):
         super(HierAttLayer, self).__init__()
 
-        # Encoder
-        self.encoder = HierAttLayerEncoder(vocab_sz, embedding_dim,
-                                           embedding_mat)
+        # Word level encoder
+        self.encoder = HierAttLayerEncoder(vocab_sz, embedding_dim, embedding_mat)
 
-        # Decoder
-        self.review_encoder = TimeDistributed(TimeDistributed(self.encoder))
+        # Sentence level encoder
         self.l_lstm_sent = nn.GRU(input_size=100,
                                   hidden_size=100,
                                   num_layers=2,
                                   bidirectional=True,
                                   batch_first=True)
-        self.l_dense_sent = TimeDistributed(
-            nn.Linear(in_features=200, out_features=100))
+        self.l_dense_sent = nn.Linear(in_features=200, out_features=100)
         self.l_att_sent = AttentionWithContext()
+        
+        # Class predictions
         self.l_linear = nn.Linear(in_features=100, out_features=4)
         self.softmax_layer = nn.LogSoftmax(dim=1)
+        
+        # LSTM Hidden State
+        self._init_hidden_state(0)
 
     def forward(self, x):
-        # output_list = []
-        # for i in x:
-        #     output, h = self.encoder(i)
-        #     print(output.shape)
-        #     output_list.append(output)
-        # print(output_list)
-        # x = torch.cat(output_list, 0)
-        print(x.shape)
-        x = self.review_encoder(x)
-        print(x.shape)
+        output_list = []
+        
+        x = x.permute(1, 0, 2)
+        for i in x:
+            output, self.sent_hidden_state = self.encoder(i, self.sent_hidden_state)
+            output_list.append(output)
+
+        x = torch.stack(output_list)
+        x = x.permute(1, 0, 2)
         x, h = self.l_lstm_sent(x)
-        print().shape
         x = self.l_dense_sent(x)
         x = self.l_att_sent(x)
         x = self.l_linear(x)
@@ -52,9 +52,11 @@ class HierAttLayer(nn.Module):
         return x
 
     def _init_hidden_state(self, batch_size):
-        # self.sent_hidden_state = torch.zeros(2, batch_size, )
-        pass
-        # return hidden
+        self.sent_hidden_state = None
+        # pass
+        # self.sent_hidden_state = torch.zeros(2 * 2, 10, 100)
+        # if torch.cuda.is_available():
+        #     self.sent_hidden_state = self.sent_hidden_state.cuda()
 
 
 class WSTC():
@@ -79,22 +81,25 @@ class WSTC():
 
         self.input_shape = input_shape
         self.n_classes = n_classes
-        self.model = self.classifier
         self.optimizer = optim.Adam(self.classifier.parameters(), lr=0.01)
+        # self.optimizer  = torch.optim.SGD(filter(lambda p: p.requires_grad, self.classifier.parameters()), lr=0.01, momentum=0.9)
         # self.optimizer = optim.SGD(self.classifier.parameters(), lr=0.01, momentum=0.9)
         self.criterion = nn.KLDivLoss(reduction='batchmean')
 
+    ### Make predictions on large dataset ###
     def predict(self, x):
-        # TODO: Change to numpy objects
         q_list = []
         preds_list = []
         for document in x:
+            with torch.no_grad():
+                self.classifier._init_hidden_state(0)
+                
             document = document[0]
             if self.is_cuda:
                 document = document.cuda()
 
             # document = Variable(document)
-            pred = self.model(document)
+            pred = self.classifier(document)
             preds_numpy = torch.exp(pred).cpu().detach().numpy()
             guesses = torch.argmax(pred.cpu(), dim=1)
             q_list.extend(preds_numpy)
@@ -109,11 +114,15 @@ class WSTC():
         actual_list = []
         preds_map = {}
         for i, (document, label) in enumerate(tqdm(test_loader)):
+            with torch.no_grad():
+                self.classifier._init_hidden_state(0)
+
             if self.is_cuda:
                 document = document.cuda()
 
             feature = self.classifier(document)
-            # Get categorical target
+            
+            # get_stats: get data for precision / recall curves
             if get_stats:
                 scores, indices = confidence_correct(torch.exp(feature).cpu().detach(), label.cpu().detach())
                 scores = scores.tolist()
@@ -122,35 +131,24 @@ class WSTC():
                 preds_list.extend(indices)
                 actual_list.extend(label.tolist())
 
+            # get_other: get number of predictions for each class
             if get_other:
                 scores, indices = confidence_correct(torch.exp(feature).cpu().detach(), label.cpu().detach())
                 indices = indices.tolist()
                 for index in indices:
                     preds_map[index] = preds_map.get(index, 0) + 1
-             
+
             test_correct += binary_accuracy(feature.cpu().detach(), label.cpu().detach(), method="eval")
 
         print('Test accuracy: {}'.format(test_correct / len(test_loader.dataset)))
-        print(preds_map)
 
-        # Write confdience and booleans to file
+        # Write confidence and booleans to file
         if get_stats:
             np.save("confidence_array.npy", np.asarray(confidence_list))
             np.save("preds_array.npy", np.asarray(preds_list))
             np.save("actual_array.npy", np.asarray(actual_list))
 
-
-    def target_distribution(self, q, power=2):
-        # square each class, divide by total of class
-        weight = q**power / q.sum(axis=0)
-        p = (weight.T / weight.sum(axis=1)).T
-        return p
-
-    def pretrain(self,
-                 train_loader,
-                 epochs,
-                 output_save_path='pretrain_output.txt',
-                 model_save_path="model.pt"):
+    def pretrain(self, train_loader, epochs, output_save_path='pretrain_output.txt', model_save_path="model.pt"):
         pretrain_output_file = open(output_save_path, 'w')
         t0 = time()
         best_dev_loss = None
@@ -163,6 +161,7 @@ class WSTC():
             train_loss = 0.
             train_correct = 0
             for i, (document, label) in enumerate(tqdm(train_loader)):
+                self.classifier._init_hidden_state(self.batch_size)
                 if self.is_cuda:
                     document = document.cuda()
                     label = label.cuda()
@@ -171,13 +170,16 @@ class WSTC():
                 feature = self.classifier(document)
 
                 # Get categorical target
-                train_correct += binary_accuracy(feature.cpu().detach(), label.cpu().detach(), method="train")
+                train_correct += binary_accuracy(feature.cpu().detach(),
+                                                 label.cpu().detach(),
+                                                 method="train")
 
                 # Compute Loss
                 loss = self.criterion(feature, label)
 
                 # Clear gradient in optimizer
                 self.optimizer.zero_grad()
+                # torch.nn.utils.clip_grad_norm_(self.classifier.parameters(), 5)
                 loss.backward()
 
                 # Do one step of gradient descent
@@ -196,8 +198,7 @@ class WSTC():
 
         # Close output file
         print('Pretraining time: {:.2f}s'.format(time() - t0))
-        print('Pretraining time: {:.2f}s'.format(time() - t0),
-              file=pretrain_output_file)
+        print('Pretraining time: {:.2f}s'.format(time() - t0), file=pretrain_output_file)
         pretrain_output_file.close()
 
     def self_train(self,
@@ -234,20 +235,18 @@ class WSTC():
                 if y is not None:
                     f1_macro, f1_micro = np.round(f1(y, y_preds), 5)
                     print('f1_macro = {}, f1_micro = {}'.format(f1_macro, f1_micro))
-                    print('f1_macro = {}, f1_micro = {}'.format(f1_macro, f1_micro), file=selftrain_file)
-                    # test_load_deprecated()
+                    print('f1_macro = {}, f1_micro = {}'.format(f1_macro, f1_micro),file=selftrain_file)
 
                 # Check stop criterion
-                delta_label = np.sum(
-                    y_preds != y_preds_last).astype(float) / y_preds.shape[0]
+                delta_label = np.sum(y_preds != y_preds_last).astype(float) / y_preds.shape[0]
                 y_preds_last = np.copy(y_preds)
                 print('Fraction of documents with label changes: {} %'.format(np.round(delta_label * 100, 3)))
                 print('Fraction of documents with label changes: {} %'.format(np.round(delta_label * 100, 3)), file=selftrain_file)
                 if ite > 0 and delta_label < tol / 100:
                     print('\nFraction: {} % < tol: {} %'.format(np.round(delta_label * 100, 3), tol))
-                    print('\nFraction: {} % < tol: {} %'.format(np.round(delta_label * 100, 3), tol),file=selftrain_file)
+                    print('\nFraction: {} % < tol: {} %'.format(np.round(delta_label * 100, 3), tol), file=selftrain_file)
                     print('Reached tolerance threshold. Stopping training.')
-                    print('Reached tolerance threshold. Stopping training.',file=selftrain_file)
+                    print('Reached tolerance threshold. Stopping training.', file=selftrain_file)
                     print('Saving...')
                     torch.save(self.classifier, model_save_path)
                     break
@@ -261,7 +260,7 @@ class WSTC():
 
         # Close output file
         print('Pretraining time: {:.2f}s'.format(time() - t0))
-        print('Pretraining time: {:.2f}s'.format(time() - t0), file=selftrain_file)
+        print('Pretraining time: {:.2f}s'.format(time() - t0),file=selftrain_file)
         selftrain_file.close()
 
     def train_on_batch(self, x, y, batch_size):
@@ -272,6 +271,7 @@ class WSTC():
         train_loss = 0.
         train_correct = 0
         for i, (document, label) in enumerate(batch_train_loader):
+            self.classifier._init_hidden_state(self.batch_size)
             if self.is_cuda:
                 document = document.cuda()
                 label = label.cuda()
@@ -280,7 +280,8 @@ class WSTC():
             feature = self.classifier(document)
 
             # Get categorical target
-            train_correct += binary_accuracy(feature.cpu().detach(), label.cpu().detach())
+            train_correct += binary_accuracy(feature.cpu().detach(),
+                                             label.cpu().detach())
 
             # Compute Loss
             loss = self.criterion(feature, label)
@@ -294,11 +295,11 @@ class WSTC():
             train_loss += loss.item()
 
     def pretrain_with_test(self,
-                 train_loader,
-                 epochs,
-                 test_loader,
-                 output_save_path='pretrain_output.txt',
-                 model_save_path="model.pt"):
+                           train_loader,
+                           epochs,
+                           test_loader,
+                           output_save_path='pretrain_output.txt',
+                           model_save_path="model.pt"):
         pretrain_output_file = open(output_save_path, 'w')
         t0 = time()
         best_dev_loss = None
@@ -308,11 +309,11 @@ class WSTC():
         self.evaluate_dataset(test_loader)
         for epoch in range(epochs):
             print('------EPOCH: ' + str(epoch) + '-------')
-            print('------EPOCH: ' + str(epoch) + '-------',
-                  file=pretrain_output_file)
+            print('------EPOCH: ' + str(epoch) + '-------', file=pretrain_output_file)
             train_loss = 0.
             train_correct = 0
             for i, (document, label) in enumerate(tqdm(train_loader)):
+                self.classifier._init_hidden_state(self.batch_size)
                 if self.is_cuda:
                     document = document.cuda()
                     label = label.cuda()
@@ -349,9 +350,15 @@ class WSTC():
 
         # Close output file
         print('Pretraining time: {:.2f}s'.format(time() - t0))
-        print('Pretraining time: {:.2f}s'.format(time() - t0),
-              file=pretrain_output_file)
+        print('Pretraining time: {:.2f}s'.format(time() - t0), file=pretrain_output_file)
         pretrain_output_file.close()
+        
+    
+    def target_distribution(self, q, power=2):
+        # square each class, divide by total of class
+        weight = q**power / q.sum(axis=0)
+        p = (weight.T / weight.sum(axis=1)).T
+        return p
 
 
 def f1(y_true, y_pred):
@@ -361,12 +368,14 @@ def f1(y_true, y_pred):
     f1_micro = f1_score(y_true, y_pred, average='micro')
     return f1_macro, f1_micro
 
+
 def binary_accuracy(preds, y, method="train"):
     preds = torch.argmax(preds, dim=1)
     if method == "train":
         y = torch.argmax(y, dim=1)
     count = torch.sum(preds == y)
     return count
+
 
 def confidence_correct(preds, y, method="eval"):
     max_value = torch.max(preds, dim=1)

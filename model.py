@@ -5,58 +5,9 @@ import torch.optim as optim
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 from torch.autograd import Variable
-from sklearn.metrics import f1_score
 from time import time
-import copy, random
 from layers import *
-
-
-class HierAttLayer(nn.Module):
-    def __init__(self, vocab_sz, embedding_dim, embedding_mat):
-        super(HierAttLayer, self).__init__()
-
-        # Word level encoder
-        self.encoder = HierAttLayerEncoder(vocab_sz, embedding_dim, embedding_mat)
-
-        # Sentence level encoder
-        self.l_lstm_sent = nn.GRU(input_size=100,
-                                  hidden_size=100,
-                                  num_layers=2,
-                                  bidirectional=True,
-                                  batch_first=True)
-        self.l_dense_sent = nn.Linear(in_features=200, out_features=100)
-        self.l_att_sent = AttentionWithContext()
-        
-        # Class predictions
-        self.l_linear = nn.Linear(in_features=100, out_features=4)
-        self.softmax_layer = nn.LogSoftmax(dim=1)
-        
-        # LSTM Hidden State
-        self._init_hidden_state(0)
-
-    def forward(self, x):
-        output_list = []
-        
-        x = x.permute(1, 0, 2)
-        for i in x:
-            output, self.sent_hidden_state = self.encoder(i, self.sent_hidden_state)
-            output_list.append(output)
-
-        x = torch.stack(output_list)
-        x = x.permute(1, 0, 2)
-        x, h = self.l_lstm_sent(x)
-        x = self.l_dense_sent(x)
-        x = self.l_att_sent(x)
-        x = self.l_linear(x)
-        x = self.softmax_layer(x)
-        return x
-
-    def _init_hidden_state(self, batch_size):
-        self.sent_hidden_state = None
-        # pass
-        # self.sent_hidden_state = torch.zeros(2 * 2, 10, 100)
-        # if torch.cuda.is_available():
-        #     self.sent_hidden_state = self.sent_hidden_state.cuda()
+from han import *
 
 
 class WSTC():
@@ -73,6 +24,7 @@ class WSTC():
         self.batch_size = batch_size
         self.classifier = HierAttLayer(vocab_sz, word_embedding_dim,
                                        embedding_matrix)
+        self.model = model
         self.is_cuda = torch.cuda.is_available()
         if classifier != None:
             self.classifier = classifier
@@ -161,7 +113,9 @@ class WSTC():
             train_loss = 0.
             train_correct = 0
             for i, (document, label) in enumerate(tqdm(train_loader)):
-                self.classifier._init_hidden_state(self.batch_size)
+                if self.model == 'rnn':
+                    self.classifier._init_hidden_state(self.batch_size)
+                    
                 if self.is_cuda:
                     document = document.cuda()
                     label = label.cuda()
@@ -360,24 +314,3 @@ class WSTC():
         p = (weight.T / weight.sum(axis=1)).T
         return p
 
-
-def f1(y_true, y_pred):
-    y_true = y_true.astype(np.int64)
-    assert y_pred.size == y_true.size
-    f1_macro = f1_score(y_true, y_pred, average='macro')
-    f1_micro = f1_score(y_true, y_pred, average='micro')
-    return f1_macro, f1_micro
-
-
-def binary_accuracy(preds, y, method="train"):
-    preds = torch.argmax(preds, dim=1)
-    if method == "train":
-        y = torch.argmax(y, dim=1)
-    count = torch.sum(preds == y)
-    return count
-
-
-def confidence_correct(preds, y, method="eval"):
-    max_value = torch.max(preds, dim=1)
-    score, indices = max_value
-    return score, indices

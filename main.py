@@ -9,6 +9,7 @@ from HAN.utils import get_evaluation
 import argparse
 from argparse import RawTextHelpFormatter
 from layers import DataWrapper
+from transformer import *
 
 
 def main():
@@ -19,7 +20,7 @@ def main():
     ### Basic Settings ###
     parser.add_argument("-m",
                         "--method",
-                        choices=["p", "s", "e", "a", "t"],
+                        choices=["p", "s", "e", "a", "t", "b"],
                         help="p: pretrain\ns: self-train\ne: eval\na: pretrain with test\nt: train on real documents")
 
     ### Training Settings ###
@@ -243,6 +244,31 @@ def main():
 
         # Call method
         wstc.pretrain(train_loader, args.pretrain_epochs)
+
+
+    if args.method == 'b':
+        from transformers import BertTokenizer
+        seed_docs_text = np.load('data/seed_docs_text.npy')
+        seed_label = np.load('data/seed_label.npy')
+
+        # Process
+        seed_label = torch.from_numpy(seed_label)
+        seed_label = seed_label.type(torch.FloatTensor)
+
+        tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+
+        bert_input = tokenize_bert(seed_docs_text, tokenizer)
+
+        train_data = DataWrapper(bert_input, seed_label)
+        train_loader = DataLoader(dataset=train_data, batch_size=64, shuffle=True)
+
+        bert = BertClassifier()
+
+        train_bert(bert, train_loader)
+
+
+
+        
 
 
 if __name__ == "__main__":

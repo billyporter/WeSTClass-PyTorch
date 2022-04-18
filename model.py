@@ -13,7 +13,7 @@ from han import *
 class WSTC():
     def __init__(self,
                  input_shape,
-                 n_classes=None,
+                 n_classes=4,
                  model='rnn',
                  vocab_sz=None,
                  word_embedding_dim=100,
@@ -108,8 +108,7 @@ class WSTC():
         print('\nPretraining...', file=pretrain_output_file)
         for epoch in range(epochs):
             print('------EPOCH: ' + str(epoch) + '-------')
-            print('------EPOCH: ' + str(epoch) + '-------',
-                  file=pretrain_output_file)
+            print('------EPOCH: ' + str(epoch) + '-------', file=pretrain_output_file)
             train_loss = 0.
             train_correct = 0
             for i, (document, label) in enumerate(tqdm(train_loader)):

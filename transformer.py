@@ -63,7 +63,6 @@ def train_bert(model, train_loader):
         train_loss = 0
 
         for train_input, train_label in tqdm(train_loader):
-
             # print()
             input_id = train_input['input_ids'].squeeze(1)
             mask = train_input['attention_mask']

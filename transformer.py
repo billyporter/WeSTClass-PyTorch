@@ -64,6 +64,7 @@ def train_bert(model, train_loader):
 
         for train_input, train_label in tqdm(train_loader):
             # print()
+            # print(train_input)
             input_id = train_input['input_ids'].squeeze(1)
             mask = train_input['attention_mask']
             

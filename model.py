@@ -8,6 +8,7 @@ from torch.autograd import Variable
 from time import time
 from layers import *
 from han import *
+from transformer import *
 
 
 class WSTC():
@@ -19,11 +20,17 @@ class WSTC():
                  word_embedding_dim=100,
                  embedding_matrix=None,
                  batch_size=256,
+                 learning_rate=0.01,
                  classifier=None):
 
         self.batch_size = batch_size
-        self.classifier = HierAttLayer(vocab_sz, word_embedding_dim,
+
+        if model == 'rnn':
+            self.classifier = HierAttLayer(vocab_sz, word_embedding_dim,
                                        embedding_matrix)
+        elif model == 'bert':
+            self.classifier = BertClassifier()
+
         self.model = model
         self.is_cuda = torch.cuda.is_available()
         if classifier != None:
@@ -33,7 +40,7 @@ class WSTC():
 
         self.input_shape = input_shape
         self.n_classes = n_classes
-        self.optimizer = optim.Adam(self.classifier.parameters(), lr=0.01)
+        self.optimizer = optim.Adam(self.classifier.parameters(), lr=learning_rate)
         # self.optimizer  = torch.optim.SGD(filter(lambda p: p.requires_grad, self.classifier.parameters()), lr=0.01, momentum=0.9)
         # self.optimizer = optim.SGD(self.classifier.parameters(), lr=0.01, momentum=0.9)
         self.criterion = nn.KLDivLoss(reduction='batchmean')
@@ -66,13 +73,20 @@ class WSTC():
         actual_list = []
         preds_map = {}
         for i, (document, label) in enumerate(tqdm(test_loader)):
-            with torch.no_grad():
-                self.classifier._init_hidden_state(0)
-
-            if self.is_cuda:
-                document = document.cuda()
-
-            feature = self.classifier(document)
+            if self.model=='rnn':
+                with torch.no_grad():
+                    self.classifier._init_hidden_state(0)
+                if self.is_cuda:
+                    document = document.cuda()
+                feature = self.classifier(document)
+            elif self.model == 'bert':
+                input_id = document['input_ids'].squeeze(1)
+                mask = document['attention_mask']
+                if self.is_cuda:
+                    input_id = input_id.cuda()
+                    mask = mask.cuda()
+                    label = label.cuda()
+                feature = self.classifier(input_id, mask)
             
             # get_stats: get data for precision / recall curves
             if get_stats:
@@ -106,6 +120,7 @@ class WSTC():
         best_dev_loss = None
         print('\nPretraining...')
         print('\nPretraining...', file=pretrain_output_file)
+        
         for epoch in range(epochs):
             print('------EPOCH: ' + str(epoch) + '-------')
             print('------EPOCH: ' + str(epoch) + '-------', file=pretrain_output_file)
@@ -115,17 +130,28 @@ class WSTC():
                 if self.model == 'rnn':
                     self.classifier._init_hidden_state(self.batch_size)
                     
-                if self.is_cuda:
-                    document = document.cuda()
-                    label = label.cuda()
-                document = Variable(document)
+                    if self.is_cuda:
+                        document = document.cuda()
+                        label = label.cuda()
+                        
+                    document = Variable(document)
+                    feature = self.classifier(document)
 
-                feature = self.classifier(document)
+                elif self.model == 'bert':
+                    input_id = document['input_ids'].squeeze(1)
+                    mask = document['attention_mask']
+                    
+                    if self.is_cuda:
+                        input_id = input_id.cuda()
+                        mask = mask.cuda()
+                        label = label.cuda()
+
+                    feature = self.classifier(input_id, mask)
 
                 # Get categorical target
                 train_correct += binary_accuracy(feature.cpu().detach(),
-                                                 label.cpu().detach(),
-                                                 method="train")
+                                                label.cpu().detach(),
+                                                method="train")
 
                 # Compute Loss
                 loss = self.criterion(feature, label)

@@ -40,6 +40,7 @@ def main():
 
     args = parser.parse_args()
     print(args)
+    print('a')
 
 
     doc_len = 10
@@ -69,7 +70,11 @@ def main():
 
 
         if args.model == "bert":
-            seed_docs = tokenizeText(seed_docs_numpy, vocabulary_inv_list)
+            docs_path = "data/real_docs_full.npy"
+            real_docs = np.load(docs_path)
+            # seed_docs = tokenizeText([real_docs[0:3]], vocabulary_inv_list)
+            seed_docs = tokenizeText([real_docs], vocabulary_inv_list)
+            # seed_docs = tokenizeText(seed_docs_numpy, vocabulary_inv_list)
 
 
     elif args.data == "load":
@@ -98,23 +103,19 @@ def main():
     # Load embedding matrix
     embedding_mat = np.load('data/embedding_mat.npy')
 
+    lr = 0.01 if args.model == 'rnn' else 0.0001
     wstc = WSTC(input_shape=xshape,
                 model=args.model,
                 batch_size=args.batch_size,
                 vocab_sz=vocab_sz,
                 embedding_matrix=embedding_mat,
-                word_embedding_dim=word_embedding_dim)
+                word_embedding_dim=word_embedding_dim,
+                learning_rate=lr)
 
     if args.method == "pretrain" or args.method == "both":
         train_data = DataWrapper(seed_docs, seed_label)
         train_loader = DataLoader(dataset=train_data, batch_size=args.batch_size, shuffle=True)
-
-        if args.model == 'rnn':
-            wstc.pretrain(train_loader, args.pretrain_epochs)
-
-        if args.model == 'bert':
-            bert = BertClassifier()
-            train_bert(bert, train_loader)
+        wstc.pretrain(train_loader, args.pretrain_epochs)
 
     if args.method == "selftrain" or args.method == "both":
 
@@ -151,7 +152,11 @@ def main():
         x = np.load(docs_path)
         y = np.load(labels_path)
 
-        x = x[:, :10, :45]
+        if args.model == 'bert':
+            vocabulary_inv_list = np.load('vocabulary_inv_list.npy')
+            x = tokenizeText(x, vocabulary_inv_list)
+
+        # x = x[:, :10, :45]
 
         # Convert to batches of tensors
         test_data = DataWrapper(x, y)

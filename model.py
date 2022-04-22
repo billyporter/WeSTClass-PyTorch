@@ -50,20 +50,27 @@ class WSTC():
         q_list = []
         preds_list = []
         for document in x:
-            with torch.no_grad():
-                self.classifier._init_hidden_state(0)
-                
             document = document[0]
-            if self.is_cuda:
-                document = document.cuda()
+            if self.model=='rnn':
+                with torch.no_grad():
+                    self.classifier._init_hidden_state(0)
+                    
+                if self.is_cuda:
+                    document = document.cuda()
+                pred = self.classifier(document)
+            elif self.model=='bert':
+                input_id = document['input_ids'].squeeze(1)
+                mask = document['attention_mask']
+                if self.is_cuda:
+                    input_id = input_id.cuda()
+                    mask = mask.cuda()
+                pred = self.classifier(input_id, mask)
 
             # document = Variable(document)
-            pred = self.classifier(document)
             preds_numpy = torch.exp(pred).cpu().detach().numpy()
             guesses = torch.argmax(pred.cpu(), dim=1)
             q_list.extend(preds_numpy)
             preds_list.extend(guesses)
-
         return q_list, preds_list
 
     def evaluate_dataset(self, test_loader, get_stats=False, get_other=True):
@@ -200,7 +207,9 @@ class WSTC():
         t0 = time()
 
         index = 0
-        index_array = np.arange(x.shape[0])
+        x_length = x.shape[0]if self.model == 'rnn' else len(x)
+        index_array = np.arange(x_length)
+        # index_array = np.arange(200)
         for ite in tqdm(range(int(maxiter))):
             if ite % update_interval == 0:
                 if ite != 0:
@@ -231,15 +240,21 @@ class WSTC():
                     break
 
             # Train on a singular batch
-            idx = index_array[index * self.batch_size:min((index + 1) * self.batch_size, x.shape[0])]
+            idx = index_array[index * self.batch_size:min((index + 1) * self.batch_size, x_length)]
+            
+            # print(index_array[index * self.batch_size:min((index + 1) * self.batch_size, x_length)])
+            # print(idx)
+            # print(x)
+            if len(idx):
+                self.train_on_batch(x=x[idx[0]:idx[-1]], y=p[idx[0]:idx[-1]], batch_size=self.batch_size)
 
-            self.train_on_batch(x=x[idx], y=p[idx], batch_size=self.batch_size)
-
-            index = index + 1 if (index + 1) * self.batch_size <= x.shape[0] else 0
+            index = index + 1 if (index + 1) * self.batch_size <= x_length else 0
 
         # Close output file
-        print('Pretraining time: {:.2f}s'.format(time() - t0))
-        print('Pretraining time: {:.2f}s'.format(time() - t0),file=selftrain_file)
+        print('Self training time: {:.2f}s'.format(time() - t0))
+        print('Self training time: {:.2f}s'.format(time() - t0),file=selftrain_file)
+        print('Saving...')
+        torch.save(self.classifier, model_save_path)
         selftrain_file.close()
 
     def train_on_batch(self, x, y, batch_size):
@@ -250,13 +265,25 @@ class WSTC():
         train_loss = 0.
         train_correct = 0
         for i, (document, label) in enumerate(batch_train_loader):
-            self.classifier._init_hidden_state(self.batch_size)
-            if self.is_cuda:
-                document = document.cuda()
-                label = label.cuda()
-            document = Variable(document)
+            if self.model == 'rnn':
+                self.classifier._init_hidden_state(self.batch_size)
+                if self.is_cuda:
+                    document = document.cuda()
+                    label = label.cuda()
+                    
+                document = Variable(document)
+                feature = self.classifier(document)
 
-            feature = self.classifier(document)
+            elif self.model == 'bert':
+                input_id = document['input_ids'].squeeze(1)
+                mask = document['attention_mask']
+                
+                if self.is_cuda:
+                    input_id = input_id.cuda()
+                    mask = mask.cuda()
+                    label = label.cuda()
+
+                feature = self.classifier(input_id, mask)
 
             # Get categorical target
             train_correct += binary_accuracy(feature.cpu().detach(),

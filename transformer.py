@@ -31,23 +31,6 @@ class BertClassifier(nn.Module):
 
         return final_layer
 
-
-def tokenize_bert(seed_documents, tokenizer):
-    seed_text = []
-    for doc in seed_documents:
-        local_str = ''
-        for i, sent in enumerate(doc):
-            local_str += ' '.join(sent[0:15])
-            if i == 2:
-                break
-        seed_text.append(local_str)
-
-    texts = [tokenizer(text,padding='max_length', max_length = 128, 
-                       truncation=True, return_tensors="pt") for text in seed_text]
-
-    return texts
-
-
 def train_bert(model, train_loader):
     is_cuda = torch.cuda.is_available()
     if is_cuda:

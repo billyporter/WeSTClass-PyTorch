@@ -13,6 +13,18 @@ class DataWrapper():
 
     def __getitem__(self, index):
         return self.x[index], self.y[index]
+
+class BertDataWrapper():
+    def __init__(self, input_ids, attention_mask, y_data):
+        self.input_ids = input_ids
+        self.attention_mask = attention_mask
+        self.y = y_data
+
+    def __len__(self):
+        return len(self.y)
+
+    def __getitem__(self, index):
+        return [self.input_ids[index], self.attention_mask[index]], self.y[index]
     
     
 

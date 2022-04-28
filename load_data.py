@@ -4,7 +4,6 @@
 # https://github.com/yumeng5/WeSTClass/blob/master/load_data.py
 #
 #######################################################
-
 import csv
 import numpy as np
 import os
@@ -13,8 +12,8 @@ import itertools
 from collections import Counter
 from os.path import join
 from nltk import tokenize
-from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.feature_extraction.text import TfidfTransformer
+# from sklearn.feature_extraction.text import CountVectorizer
+# from sklearn.feature_extraction.text import TfidfTransformer
 
 
 def read_file(data_dir, with_evaluation):

@@ -7,10 +7,11 @@ import numpy as np
 import re
 import torch
 from statistics import mean
-from layers import DataWrapper
+from layers import DataWrapper, BertDataWrapper
 import random
 import spherecluster
 from spherecluster import SphericalKMeans, VonMisesFisherMixture, sample_vMF
+from time import time
 
 def tokenizeText(encoded_docs, vocabulary_inv_list):
     vocabulary_inv = {key: value for key, value in enumerate(vocabulary_inv_list)}
@@ -27,29 +28,28 @@ def tokenizeText(encoded_docs, vocabulary_inv_list):
                     continue
                 temp_doc.append(vocabulary_inv[encoded_word])
         docs_text.append(" ".join(temp_doc))
-    # print(docs_text)
     print("Converting text to tokens...")
-    texts = [tokenizer(text,padding='max_length', max_length = 450, 
-                       truncation=True, return_tensors="pt") for text in tqdm(docs_text)]
+    # texts = [tokenizer(text,padding='max_length', max_length = 450, 
+    #                    truncation=True, return_tensors="pt") for text in tqdm(docs_text)]
+    texts = tokenizer(docs_text, padding='max_length', max_length = 450, truncation=True, return_tensors="pt")
     return texts
-
-def generateEmbeddings():
-    pass
 
 def clean_str(string):
     string = re.sub(r"[^A-Za-z0-9(),.!?_\"\'\`]", " ", string)
     string = re.sub(r"\s{2,}", " ", string)
     return string.strip().lower()
+
 def preprocess_doc(data):
     data = [s.strip() for s in data]
     data = [clean_str(s) for s in data]
     return data
 
-def load_data_bert(dataset_name="agnews", sup_source="keywords", num_keywords=10, with_evaluation=True, truncate_len=None):
+def load_data_bert(dataset_name="agnews", sup_source="keywords", num_keywords=10, with_evaluation=True, truncate_len=None, gen_seed_docs="generate"):
 
     data_path = './' + dataset_name
     data, y = read_file(data_path, with_evaluation)
     data = data[:100] # Delete later
+    y = y[:100]
 
     # Clean data
     random.shuffle(data)
@@ -62,9 +62,10 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", num_keywords=10
     print('Done preprocessing...')
 
     # Tokenize data
+    print("Converting text to tokens...")
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
     encoded_data = tokenizer(data, padding='max_length', max_length = 200, truncation=True,)
-    encoded_keywords = tokenizer(keywords_sents, padding='max_length', max_length = 200, truncation=True,)
+    encoded_keywords = tokenizer(keywords_sents, padding='max_length', max_length = 200, truncation=True)
     print('Done tokenizing...')
 
     # Load pre-trained model (weights)
@@ -77,6 +78,7 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", num_keywords=10
     tokens_tensor = torch.tensor(encoded_data["input_ids"])
     segments_tensor = torch.tensor(encoded_data["token_type_ids"])
     bert_data = DataWrapper(tokens_tensor, segments_tensor)
+    # bert_data = BertDataWrapper(encoded_data)
     bert_loader = DataLoader(dataset=bert_data, batch_size=8, shuffle=False)
 
     # Keywords model prep
@@ -155,25 +157,27 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", num_keywords=10
             keyword_embeds.append(class_embeds)
             keyword_encodes.append(class_encodes)
 
+    seed_docs = []
+    seed_labels = []
+    if gen_seed_docs == "generate":
+        # Create embedding matrix
+        embedding_mat = np.array(list(embed_encode_dict.keys()))
 
-    # Create embedding matrix
-    embedding_mat = np.array(list(embed_encode_dict.keys()))
+        # Get VMF Distribution
+        _, centers, kappas = label_expansion_bert(embedding_mat, embed_encode_dict, keyword_embeds, keyword_encodes, tokenizer)
 
-    # Get VMF Distribution
-    _, centers, kappas = label_expansion_bert(embedding_mat, embed_encode_dict, keyword_embeds, keyword_encodes, tokenizer)
-
-    # Generate Pseudo Documents
-    print("Pseudo documents generation...")
-    seed_docs, seed_labels = psuedodocs_bert(embedding_mat, encode_count_dict, tokenizer, keyword_encodes, encode_list, centers, kappas)
+        # Generate Pseudo Documents
+        print("Pseudo documents generation...")
+        seed_docs, seed_labels = psuedodocs_bert(embedding_mat, encode_count_dict, tokenizer, keyword_encodes, encode_list, centers, kappas)
     
-    return seed_docs, seed_labels
+    return data, y, seed_docs, seed_labels
 
 
 def psuedodocs_bert(embedding_mat, encode_count_dict, tokenizer, keyword_encodes, encode_list, centers, kappas):
 
     # Constants TODO (@billy): Clean up later
     alpha = 0.2
-    beta = 500
+    beta = 100
     gamma = 50
     sequence_length = 300
     doc_len = 40
@@ -223,10 +227,6 @@ def psuedodocs_bert(embedding_mat, encode_count_dict, tokenizer, keyword_encodes
             labels[i*num_doc+j] = interp_weight/len(keyword_encodes)*np.ones(len(keyword_encodes))
             labels[i*num_doc+j][i] += 1 - interp_weight
             # TODO: Add period, maybe separate into sentences?
-
-            print(tokenizer.decode(encoded_prob))
-            print('--------')
-        print().shape
     return docs, labels
 
 

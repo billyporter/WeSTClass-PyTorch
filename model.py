@@ -59,8 +59,7 @@ class WSTC():
                     document = document.cuda()
                 pred = self.classifier(document)
             elif self.model=='bert':
-                input_id = document['input_ids'].squeeze(1)
-                mask = document['attention_mask']
+                input_id, mask = document
                 if self.is_cuda:
                     input_id = input_id.cuda()
                     mask = mask.cuda()
@@ -87,8 +86,7 @@ class WSTC():
                     document = document.cuda()
                 feature = self.classifier(document)
             elif self.model == 'bert':
-                input_id = document['input_ids'].squeeze(1)
-                mask = document['attention_mask']
+                input_id, mask = document
                 if self.is_cuda:
                     input_id = input_id.cuda()
                     mask = mask.cuda()
@@ -145,8 +143,7 @@ class WSTC():
                     feature = self.classifier(document)
 
                 elif self.model == 'bert':
-                    input_id = document['input_ids'].squeeze(1)
-                    mask = document['attention_mask']
+                    input_id, mask = document
                     
                     if self.is_cuda:
                         input_id = input_id.cuda()
@@ -275,8 +272,7 @@ class WSTC():
                 feature = self.classifier(document)
 
             elif self.model == 'bert':
-                input_id = document['input_ids'].squeeze(1)
-                mask = document['attention_mask']
+                input_id, mask = document
                 
                 if self.is_cuda:
                     input_id = input_id.cuda()

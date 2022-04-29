@@ -4,7 +4,6 @@
 # https://github.com/yumeng5/WeSTClass/blob/master/gen.py
 #
 #######################################################
-
 import numpy as np
 import os
 np.random.seed(1234)
@@ -51,6 +50,9 @@ def label_expansion(class_labels, write_path, vocabulary_inv, embedding_mat):
         current_szes.append(current_sz)
         prob_sup_array.append([1/current_sz] * current_sz)
         all_class_labels += list(class_label)
+    print("all class labels: ", all_class_labels)
+    print("prob sup array: ", prob_sup_array)
+
     current_sz = np.min(current_szes)
     while len(all_class_labels) == len(set(all_class_labels)):
         current_sz += 1
@@ -141,13 +143,19 @@ def generate_pseudocs(embedding_mat, word_sup_list, vocabulary_inv_list, word_co
     beta = 500 # number of pseudodocs per flass
     gamma = 50 # keyword vocabulary size
     word_sup_array = np.array([np.array([vocabulary[word] for word in word_class_list]) for word_class_list in word_sup_list])
+    # print(word_sup_array.shape)
+    # print("word_sup_array: ", word_sup_array)
+    # print().shape
 
 
     total_counts = sum(word_counts[ele] for ele in word_counts)
     total_counts -= word_counts[vocabulary_inv_list[0]]
     background_array = np.zeros(vocab_sz)
-    for i in range(1,vocab_sz):
+    for i in range(0,vocab_sz):
         background_array[i] = word_counts[vocabulary_inv[i]]/total_counts
+    background_array = np.true_divide(background_array, total_counts)
+    print('background array: ', background_array)
+    
     seed_docs, seed_label = pseudodocs(word_sup_array, gamma, background_array,
                                             sequence_length, len_avg, len_std, beta, alpha, 
                                             vocabulary_inv, embedding_mat)

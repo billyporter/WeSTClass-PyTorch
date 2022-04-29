@@ -15,9 +15,10 @@ class DataWrapper():
         return self.x[index], self.y[index]
 
 class BertDataWrapper():
-    def __init__(self, input_ids, attention_mask, y_data):
-        self.input_ids = input_ids
-        self.attention_mask = attention_mask
+    def __init__(self, documents, y_data):
+        print(documents["attention_mask"][0])
+        self.input_ids = documents["input_ids"]
+        self.attention_mask = documents["attention_mask"]
         self.y = y_data
 
     def __len__(self):
@@ -27,7 +28,6 @@ class BertDataWrapper():
         return [self.input_ids[index], self.attention_mask[index]], self.y[index]
     
     
-
 def f1(y_true, y_pred):
     y_true = y_true.astype(np.int64)
     assert y_pred.size == y_true.size

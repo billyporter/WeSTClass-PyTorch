@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 from layers import DataWrapper
 import argparse
 from argparse import RawTextHelpFormatter
-from layers import DataWrapper
+from layers import DataWrapper, BertDataWrapper
 from transformer import *
 from load_data import load_dataset
 from gen import *
@@ -53,30 +53,29 @@ def main():
         # print('word_sup_list: ', word_sup_list)
 
         x, y, seed_docs, seed_label = \
-            load_data_bert(with_evaluation=args.with_statistics, truncate_len=truncate_len)
-        print().shape
+            load_data_bert(with_evaluation=args.with_statistics, truncate_len=truncate_len, gen_seed_docs=args.data)
 
     ### Load Data
-    if args.data == "generate":
+    # if args.data == "generate":
 
-        x = x[:, :doc_len, :sent_len]
-        sequence_length = [doc_len, sent_len]
+    #     x = x[:, :doc_len, :sent_len]
+    #     # sequence_length = [doc_len, sent_len]
 
-        print("\n### Input preparation ###")
-        embedding_mat = np.load('data/embedding_mat.npy')
+    #     # print("\n### Input preparation ###")
+    #     # embedding_mat = np.load('data/embedding_mat.npy')
 
-        print("\n### Phase 1: vMF distribution fitting & pseudo document generation ###")
-        seed_docs, seed_label = generate_pseudocs(embedding_mat, word_sup_list, vocabulary_inv_list, 
-                                                word_counts, sequence_length, vocabulary, len_avg, len_std)
+    #     # print("\n### Phase 1: vMF distribution fitting & pseudo document generation ###")
+    #     # seed_docs, seed_label = generate_pseudocs(embedding_mat, word_sup_list, vocabulary_inv_list, 
+    #     #                                         word_counts, sequence_length, vocabulary, len_avg, len_std)
 
-        perm_seed = np.random.permutation(len(seed_label))
-        seed_docs = seed_docs[perm_seed]
-        seed_label = seed_label[perm_seed]
+    #     # perm_seed = np.random.permutation(len(seed_label))
+    #     # seed_docs = seed_docs[perm_seed]
+    #     # seed_label = seed_label[perm_seed]
 
 
-        if args.model == "bert":
-            seed_docs = tokenizeText(x, vocabulary_inv_list)
-            # seed_docs = tokenizeText(seed_docs_numpy, vocabulary_inv_list)
+    #     if args.model == "bert":
+    #         seed_docs = tokenizeText(x, vocabulary_inv_list)
+    #         # seed_docs = tokenizeText(seed_docs_numpy, vocabulary_inv_list)
 
 
     elif args.data == "load":
@@ -116,7 +115,7 @@ def main():
                 learning_rate=lr)
 
     if args.method == "pretrain" or args.method == "both":
-        train_data = DataWrapper(seed_docs, seed_label)
+        train_data = DataWrapper(seed_docs, seed_label) if args.model == 'rnn' else BertDataWrapper(seed_docs, seed_label)
         train_loader = DataLoader(dataset=train_data, batch_size=args.batch_size, shuffle=True)
         wstc.pretrain(train_loader, args.pretrain_epochs)
 

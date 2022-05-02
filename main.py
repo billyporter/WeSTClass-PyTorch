@@ -4,14 +4,13 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from layers import DataWrapper
 import argparse
 from argparse import RawTextHelpFormatter
-from layers import DataWrapper, BertDataWrapper
-from transformer import *
-from load_data import load_dataset
-from gen import *
-from bert_utils import *
+from utils.datahelper import DataWrapper, BertDataWrapper
+from architectures.transformer import *
+from utils.load_data import load_dataset
+from utils.gen import *
+from utils.bert_utils import *
 
 
 def main():
@@ -45,7 +44,8 @@ def main():
 
     doc_len = 10
     sent_len = 45
-    truncate_len = [doc_len, sent_len]
+    real_trunc = [doc_len, sent_len]
+    pseudo_trunc = [3, 15]
 
     if args.method in ("selftrain", "both") or args.data == "generate":
         # x, y, word_counts, vocabulary, vocabulary_inv_list, len_avg, len_std, word_sup_list, perm = \
@@ -53,7 +53,7 @@ def main():
         # print('word_sup_list: ', word_sup_list)
 
         x, y, seed_docs, seed_label = \
-            load_data_bert(with_evaluation=args.with_statistics, truncate_len=truncate_len, gen_seed_docs=args.data)
+            load_data_bert(with_evaluation=args.with_statistics, gen_seed_docs=args.data)
 
     ### Load Data
     # if args.data == "generate":
@@ -79,15 +79,14 @@ def main():
 
 
     elif args.data == "load":
-        seed_docs_numpy = np.load('data/seed_docs.npy')
-
-        # Process
-        seed_label = np.load('data/seed_label.npy')
-        seed_docs = torch.from_numpy(seed_docs_numpy)
+        if args.model == "rnn":
+            seed_docs_numpy = np.load('data/seed_docs.npy')
+            seed_label = np.load('data/seed_label.npy')
+            seed_docs = torch.from_numpy(seed_docs_numpy)
 
         if args.model == "bert":
-            vocabulary_inv_list = np.load('vocabulary_inv_list.npy')
-            seed_docs = tokenizeText(seed_docs_numpy, vocabulary_inv_list)
+            seed_docs = np.load('seed_docs_bert.npy', allow_pickle=True).item()
+            seed_label = np.load('seed_labels_bert.npy')
 
 
     seed_label = torch.from_numpy(seed_label)
@@ -187,7 +186,7 @@ def main():
         # x = x[:, :10, :45]
 
         # Convert to batches of tensors
-        test_data = DataWrapper(x, y)
+        test_data = DataWrapper(x, y) if args.model == 'rnn' else BertDataWrapper(x, y)
         test_loader = DataLoader(dataset=test_data,
                                  batch_size=args.batch_size,
                                  shuffle=False)

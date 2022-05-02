@@ -6,9 +6,9 @@ from tqdm import tqdm
 from torch.utils.data import DataLoader
 from torch.autograd import Variable
 from time import time
-from layers import *
-from han import *
-from transformer import *
+from utils.datahelper import *
+from architectures.han import *
+from architectures.transformer import *
 
 
 class WSTC():
@@ -361,4 +361,3 @@ class WSTC():
         weight = q**power / q.sum(axis=0)
         p = (weight.T / weight.sum(axis=1)).T
         return p
-

@@ -25,6 +25,7 @@ def main():
     parser.add_argument("--evaluate", default="True", choices=["True", "False"])
     parser.add_argument("--with_statistics", default="True", choices=["True", "False"])
     parser.add_argument("--trained_weights", default=None)
+    parser.add_argument('--sup_source', default='keywords', choices=['labels', 'keywords', 'docs'])
 
     ### Training Settings ###
     # mini-batch size for both pre-training and self-training: 256 (default)
@@ -52,17 +53,20 @@ def main():
     elif args.model == 'cnn':
         sequence_length = max_seq_len_cnn
 
-    print(sequence_length)
+    # print(sequence_length)
     if args.method in ("selftrain", "both") or args.data == "generate":
-        x, y, word_counts, vocabulary, vocabulary_inv_list, len_avg, len_std, word_sup_list, perm = \
-            load_dataset(args.model, with_evaluation=args.with_statistics, truncate_len=sequence_length)
+        # if args.sup_source == 'labels' or args.sup_source == 'keywords':
+        #     x, y, word_counts, vocabulary, vocabulary_inv_list, len_avg, len_std, word_sup_list, perm = \
+        #         load_dataset(args.model, sup_source=args.sup_source, with_evaluation=args.with_statistics, truncate_len=sequence_length)
+        # elif args.sup_source == 'docs':
+        #     x, y, word_counts, vocabulary, vocabulary_inv_list, len_avg, len_std, word_sup_list, sup_idx, perm = \
+        #         load_dataset(model=args.model, sup_source=args.sup_source, with_evaluation=args.with_statistics, truncate_len=sequence_length)
 
-        np.save("cnn_x.npy", x)
-        np.save("cnn_y.npy", y)
-        print().shape
+        # np.save("cnn_x.npy", x)
+        # np.save("cnn_y.npy", y)
 
-        # x, y, seed_docs, seed_label = \
-        #     load_data_bert(with_evaluation=args.with_statistics, gen_seed_docs=args.data)
+        x, y, seed_docs, seed_label = \
+            load_data_bert(sup_source=args.sup_source, with_evaluation=args.with_statistics, gen_seed_docs=args.data)
 
     ### Load Data
     if args.data == "generate":
@@ -92,7 +96,7 @@ def main():
 
         if args.model == "bert":
             seed_docs = tokenizeText(x, vocabulary_inv_list)
-            # seed_docs = tokenizeText(seed_docs_numpy, vocabulary_inv_list)
+            seed_docs = tokenizeText(seed_docs_numpy, vocabulary_inv_list)
 
 
     elif args.data == "load":
@@ -100,6 +104,8 @@ def main():
             seed_docs_numpy = np.load('data/seed_docs.npy')
             seed_label = np.load('data/seed_label.npy')
             seed_docs = torch.from_numpy(seed_docs_numpy)
+            print(seed_docs)
+            print().shape
 
         if args.model == "cnn":
             seed_docs_numpy = np.load('seed_docs_numpy_cnn.npy')
@@ -196,14 +202,13 @@ def main():
         labels_path = "cnn_y.npy"
 
         # Load saved model
-        model = torch.load('model.pt')
+        # model = torch.load('model.pt')
 
         # Load real documents
         x = np.load(docs_path)
         y = np.load(labels_path)
-        print(x.shape)
         # x = x[:, :10, :45]
-        x = x[:100]
+        x = x[:, :100]
 
         if args.model == 'bert':
             vocabulary_inv_list = np.load('vocabulary_inv_list.npy')
@@ -218,13 +223,13 @@ def main():
                                  shuffle=False)
 
         # Create object
-        wstc = WSTC(input_shape=xshape,
-                    classifier=model,
-                    model=args.model,
-                    batch_size=args.batch_size,
-                    vocab_sz=vocab_sz,
-                    embedding_matrix=embedding_mat,
-                    word_embedding_dim=word_embedding_dim)
+        # wstc = WSTC(input_shape=xshape,
+        #             classifier=model,
+        #             model=args.model,
+        #             batch_size=args.batch_size,
+        #             vocab_sz=vocab_sz,
+        #             embedding_matrix=embedding_mat,
+        #             word_embedding_dim=word_embedding_dim)
 
         # Cal method
         wstc.evaluate_dataset(test_loader)

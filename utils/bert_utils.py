@@ -2,39 +2,17 @@ from base64 import decode, encode
 from tkinter.filedialog import test
 from transformers import BertTokenizer, BertModel, DistilBertModel, DistilBertTokenizer
 from tqdm import tqdm
-from utils.load_data import read_file, load_keywords
 from torch.utils.data import DataLoader
 import numpy as np
 import re
 import torch
 from statistics import mean
-from utils.datahelper import DataWrapper, BertDataWrapper
 import random
 from os.path import join
-import spherecluster
-from spherecluster import SphericalKMeans, VonMisesFisherMixture, sample_vMF
 from time import time
-
-def tokenizeText(encoded_docs, vocabulary_inv_list):
-    vocabulary_inv = {key: value for key, value in enumerate(vocabulary_inv_list)}
-    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-
-    # Convert to text, drop pads
-    docs_text = []
-    print("Converting encoding to text...")
-    for doc in tqdm(encoded_docs):
-        temp_doc = []
-        for sent in doc:
-            for encoded_word in sent:
-                if encoded_word == 0:
-                    continue
-                temp_doc.append(vocabulary_inv[encoded_word])
-        docs_text.append(" ".join(temp_doc))
-    print("Converting text to tokens...")
-    # texts = [tokenizer(text,padding='max_length', max_length = 450, 
-    #                    truncation=True, return_tensors="pt") for text in tqdm(docs_text)]
-    texts = tokenizer(docs_text, padding='max_length', max_length = 450, truncation=True, return_tensors="pt")
-    return texts
+from utils.gen_bert import *
+from utils.load_data import read_file, load_keywords
+from utils.datahelper import DataWrapper, BertDataWrapper
 
 def clean_str(string):
     string = re.sub(r"[^A-Za-z0-9(),.!?_\"\'\`]", " ", string)
@@ -134,12 +112,9 @@ def extract_keywords(data_path, num_keywords, data, perm):
 
     return keywords, new_sup_idx
 
-def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation=True, gen_seed_docs="generate"):
-    print('HERE')
+def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation=True, gen_seed_docs="generate", batch_size=8):
     data_path = 'data/' + dataset_name
     data, y = read_file(data_path, with_evaluation)
-    # data = data[:100] # Delete later
-    # y = y[:100]
 
     # Clean data
     data = preprocess_doc(data)
@@ -160,9 +135,7 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
     keywords_sents = [" ".join(sent) for sent in keywords]
     print(keywords)
     print('Done preprocessing...')
-    data = data[:100]
 
-    random.shuffle(data) # DELETE LATER
     # Tokenize data
     print("Converting text to tokens...")
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
@@ -181,7 +154,7 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
     segments_tensor = torch.tensor(encoded_data["token_type_ids"])
     bert_data = DataWrapper(tokens_tensor, segments_tensor)
     # bert_data = BertDataWrapper(encoded_data)
-    bert_loader = DataLoader(dataset=bert_data, batch_size=8, shuffle=False)
+    bert_loader = DataLoader(dataset=bert_data, batch_size=batch_size, shuffle=False)
 
     # Keywords model prep
     tokens_tensor_keywords = torch.tensor(encoded_keywords["input_ids"])
@@ -282,144 +255,5 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
         seed_attention_mask[:, :sequence_length] = 1
 
     seed_docs = {"input_ids": seed_docs_input_ids, "attention_mask": seed_attention_mask}
-
-    print(seed_labels.shape)
-    print(seed_attention_mask.shape)
-    print(seed_docs_input_ids.shape)
-    # print(seed_docs)
-    # np.save("seed_docs_bert.npy", seed_docs)
-    # np.save("seed_labels_bert.npy", seed_labels)
-    # print().shape
     
     return encoded_data, y, seed_docs, seed_labels
-
-
-def psuedodocs_bert(embedding_mat, encode_count_dict, keyword_encodes, encode_list, centers, kappas, doc_settings):
-
-    # Constants TODO (@billy): Clean up later
-    num_doc_per_class, total_num, interp_weight, doc_len, sequence_length = doc_settings
-    num_class = len(keyword_encodes)
-
-    docs = np.zeros((num_doc_per_class * num_class, doc_len), dtype='int32')
-    labels = np.zeros((num_doc_per_class * num_class, num_class))
-
-    # Create background of word frequency
-    background_array = np.zeros(len(encode_list))
-    total_count = 0
-    for i in range(1, len(encode_list)):
-        current_encode = encode_list[i]
-        current_count = encode_count_dict[current_encode]
-        total_count += current_count
-        background_array[i] = current_count
-    background_array = np.true_divide(background_array, total_count)
-    background_vec = interp_weight * background_array
-
-    # Loop over classes
-    for i in range(0, len(keyword_encodes)):
-        center, kappa = centers[i], kappas[i]
-        discourses = sample_vMF(center, kappa, num_doc_per_class)
-
-        # Loop over discourses
-        for j in range(num_doc_per_class):
-            discourse = discourses[j]
-
-            # Get most similar tokens to discourse
-            prob_vec = np.dot(embedding_mat, discourse)
-            prob_vec = np.exp(prob_vec)
-            sorted_idx = np.argsort(prob_vec)[::-1]
-
-            # Restrict vocabulary size
-            delete_idx = sorted_idx[total_num:]
-            prob_vec[delete_idx] = 0
-
-            # Adjust vocabulary for word frequency
-            prob_vec /= np.sum(prob_vec)
-            prob_vec *= 1 - interp_weight
-            prob_vec += background_vec
-            prob_indices = np.random.choice(len(prob_vec), size=doc_len, p=prob_vec)
-            encoded_prob = [encode_list[i] for i in prob_indices]
-            docs[i*num_doc_per_class+j] = encoded_prob 
-            labels[i*num_doc_per_class+j] = interp_weight/num_class*np.ones(num_class)
-            labels[i*num_doc_per_class+j][i] += 1 - interp_weight
-            # TODO: Add period, maybe separate into sentences?
-    return docs, labels
-
-
-def label_expansion_bert(embedding_mat, embed_encode_dict, keyword_embeds, keyword_encodes, tokenizer):
-    print("Retrieving top-t nearest words...")
-
-    # Get Average Embedding of keywords
-    avg_embeddings = []
-    for class_embeds in keyword_embeds:
-        word_embeddings = torch.zeros((len(class_embeds), 768))
-        for j, embed in enumerate(class_embeds):
-            word_embeddings[j] = torch.FloatTensor(embed)
-        combined_embedding = torch.mean(word_embeddings, 0)
-        avg_embeddings.append(combined_embedding)
-
-    #### Generate psuedo document vocabulary ####
-    words_list = []
-    all_class_labels = []
-    sz = 3
-    # Stop when a word is shared between classes
-    while len(all_class_labels) == len(set(all_class_labels)):
-        sz += 1
-        expanded_array, exp_debug = seed_expansion_bert(sz, embedding_mat, avg_embeddings, embed_encode_dict, keyword_embeds, keyword_encodes)
-        all_class_labels = [w for w_class in exp_debug for w in w_class]
-    expanded_array, exp_debug = seed_expansion_bert(sz - 1, embedding_mat, avg_embeddings, embed_encode_dict, keyword_embeds, keyword_encodes)
-    print("Final expansion size t = {}".format(len(expanded_array[0])))
-
-    # Decode class labels (Delete Later)
-    print("Size: ", sz - 1)
-    for class_label in exp_debug:
-        decoded_text = tokenizer.decode(class_label)
-        print(decoded_text)
-        print()
-
-
-    centers = []
-    kappas = []
-    print("Top-t nearest words for each class:")
-    for i in range(len(exp_debug)):
-        expanded_mat = expanded_array[i]
-        expanded_encodes = exp_debug[i]
-        vocab_expanded = tokenizer.decode(expanded_encodes)
-        print("Class {}:".format(i))
-        print(vocab_expanded)
-        vmf_soft = VonMisesFisherMixture(n_clusters=1, n_jobs=15)
-        vmf_soft.fit(expanded_mat)
-        center = vmf_soft.cluster_centers_[0]
-        kappa = vmf_soft.concentrations_[0]
-        centers.append(center)
-        kappas.append(kappa)
-
-    print("Finished vMF distribution fitting.")
-    return expanded_array, centers, kappas
-
-
-def seed_expansion_bert(sz, embedding_mat, avg_embeddings, embed_encode_dict, keyword_embeds, keyword_encodes):
-    expanded_seed_debug = []
-    expanded_seed = []
-    for i in range(0, len(keyword_embeds)):
-
-        # Get most similar words to keywords
-        expanded = np.dot(embedding_mat, avg_embeddings[i])
-        word_expanded = sorted(range(len(expanded)), key=lambda k: expanded[k], reverse=True)
-        expanded_class_encodings = keyword_encodes[i] + []
-        expanded_class_embeds = keyword_embeds[i] + []
-        words_added = 0
-        word_index = 0
-
-        # Add most simialr keywords until size reached
-        while words_added < sz:
-            embedding_index = word_expanded[word_index]
-            embedding = tuple(embedding_mat[embedding_index].tolist())
-            encoding = embed_encode_dict[embedding]
-            if encoding not in expanded_class_encodings:
-                expanded_class_encodings.append(encoding)
-                expanded_class_embeds.append(embedding)
-                words_added += 1
-            word_index += 1
-        expanded_seed_debug.append(np.array(expanded_class_encodings))
-        expanded_seed.append(np.array(expanded_class_embeds))
-    return expanded_seed, expanded_seed_debug

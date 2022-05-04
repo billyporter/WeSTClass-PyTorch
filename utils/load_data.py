@@ -87,6 +87,9 @@ def build_vocab(sentences):
     vocabulary = {x: i for i, x in enumerate(vocabulary_inv)}
     return word_counts, vocabulary, vocabulary_inv
 
+def build_input_data_cnn(sentences, vocabulary):
+    x = np.array([[vocabulary[word] for word in sentence] for sentence in sentences])
+    return x
 
 def build_input_data_rnn(data, vocabulary, max_doc_len, max_sent_len):
     x = np.zeros((len(data), max_doc_len, max_sent_len), dtype='int32')
@@ -199,7 +202,7 @@ def load_rnn(dataset_name, sup_source, num_keywords=10, with_evaluation=True, tr
     import nltk
     nltk.download('punkt')
 
-    data_path = './' + dataset_name
+    data_path = 'data/' + dataset_name
     data, y = read_file(data_path, with_evaluation)
 
     sz = len(data)
@@ -275,5 +278,62 @@ def load_rnn(dataset_name, sup_source, num_keywords=10, with_evaluation=True, tr
         return x, y, word_counts, vocabulary, vocabulary_inv, len_avg, len_std, keywords, sup_idx, perm
 
 
-def load_dataset(sup_source="keywords", with_evaluation=True, truncate_len=[10, 45]):
-    return load_rnn("agnews", sup_source, with_evaluation=with_evaluation, truncate_len=truncate_len)
+def load_cnn(dataset_name, sup_source, num_keywords=10, with_evaluation=True, truncate_len=None):
+    data_path = 'data/' + dataset_name
+    data, y = read_file(data_path, with_evaluation)
+
+    sz = len(data)
+    np.random.seed(1234)
+    perm = np.random.permutation(sz)
+
+    data = preprocess_doc(data)
+    data = [s.split(" ") for s in data]
+
+    tmp_list = [len(doc) for doc in data]
+    len_max = max(tmp_list)
+    len_avg = np.average(tmp_list)
+    len_std = np.std(tmp_list)
+
+    print("\n### Dataset statistics: ###")
+    print('Document max length: {} (words)'.format(len_max))
+    print('Document average length: {} (words)'.format(len_avg))
+    print('Document length std: {} (words)'.format(len_std))
+
+    if truncate_len is None:
+        truncate_len = min(int(len_avg + 3*len_std), len_max)
+    print("Defined maximum document length: {} (words)".format(truncate_len))
+    print('Fraction of truncated documents: {}'.format(sum(tmp > truncate_len for tmp in tmp_list)/len(tmp_list)))
+    
+    sequences_padded = pad_sequences(data)
+    word_counts, vocabulary, vocabulary_inv = build_vocab(sequences_padded)
+    x = build_input_data_cnn(sequences_padded, vocabulary)
+    x = x[perm]
+
+    if with_evaluation:
+        print("Number of classes: {}".format(len(np.unique(y))))
+        print("Number of documents in each class:")
+        for i in range(len(np.unique(y))):
+            print("Class {}: {}".format(i, len(np.where(y == i)[0])))
+        y = y[perm]
+
+    print("Vocabulary Size: {:d}".format(len(vocabulary_inv)))
+
+    if sup_source == 'labels' or sup_source == 'keywords':
+        keywords = load_keywords(data_path, sup_source)
+        return x, y, word_counts, vocabulary, vocabulary_inv, len_avg, len_std, keywords, perm
+    elif sup_source == 'docs':
+        if dataset_name == 'nyt':
+            class_type = 'topic'
+        elif dataset_name == 'agnews':
+            class_type = 'topic'
+        elif dataset_name == 'yelp':
+            class_type = 'sentiment'
+        keywords, sup_idx = extract_keywords(data_path, vocabulary, class_type, num_keywords, data, perm)
+        return x, y, word_counts, vocabulary, vocabulary_inv, len_avg, len_std, keywords, sup_idx, perm
+
+
+def load_dataset(model, sup_source="keywords", with_evaluation=True, truncate_len=[10, 45]):
+    if model == 'cnn':
+        return load_cnn("agnews", sup_source, with_evaluation=with_evaluation, truncate_len=truncate_len)
+    if model == 'rnn':
+        return load_rnn("agnews", sup_source, with_evaluation=with_evaluation, truncate_len=truncate_len)

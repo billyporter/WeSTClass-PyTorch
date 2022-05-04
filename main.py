@@ -20,7 +20,7 @@ def main():
 
     ### Basic Settings ###
     parser.add_argument("--data", default="generate", choices=["generate", "load"])
-    parser.add_argument("--model", default="rnn", choices=["rnn", "bert"])
+    parser.add_argument("--model", default="cnn", choices=["rnn", "bert", "cnn"])
     parser.add_argument("--method", default="pretrain", choices=["pretrain", "selftrain", "both", "neither"])
     parser.add_argument("--evaluate", default="True", choices=["True", "False"])
     parser.add_argument("--with_statistics", default="True", choices=["True", "False"])
@@ -46,42 +46,64 @@ def main():
     sent_len = 45
     real_trunc = [doc_len, sent_len]
     pseudo_trunc = [3, 15]
+    max_seq_len_cnn = 100
+    if args.model == 'rnn':
+        sequence_length = real_trunc
+    elif args.model == 'cnn':
+        sequence_length = max_seq_len_cnn
 
+    print(sequence_length)
     if args.method in ("selftrain", "both") or args.data == "generate":
-        # x, y, word_counts, vocabulary, vocabulary_inv_list, len_avg, len_std, word_sup_list, perm = \
-        #     load_dataset(with_evaluation=args.with_statistics, truncate_len=truncate_len)
-        # print('word_sup_list: ', word_sup_list)
+        x, y, word_counts, vocabulary, vocabulary_inv_list, len_avg, len_std, word_sup_list, perm = \
+            load_dataset(args.model, with_evaluation=args.with_statistics, truncate_len=sequence_length)
 
-        x, y, seed_docs, seed_label = \
-            load_data_bert(with_evaluation=args.with_statistics, gen_seed_docs=args.data)
+        np.save("cnn_x.npy", x)
+        np.save("cnn_y.npy", y)
+        print().shape
+
+        # x, y, seed_docs, seed_label = \
+        #     load_data_bert(with_evaluation=args.with_statistics, gen_seed_docs=args.data)
 
     ### Load Data
-    # if args.data == "generate":
-
-    #     x = x[:, :doc_len, :sent_len]
-    #     # sequence_length = [doc_len, sent_len]
-
-    #     # print("\n### Input preparation ###")
-    #     # embedding_mat = np.load('data/embedding_mat.npy')
-
-    #     # print("\n### Phase 1: vMF distribution fitting & pseudo document generation ###")
-    #     # seed_docs, seed_label = generate_pseudocs(embedding_mat, word_sup_list, vocabulary_inv_list, 
-    #     #                                         word_counts, sequence_length, vocabulary, len_avg, len_std)
-
-    #     # perm_seed = np.random.permutation(len(seed_label))
-    #     # seed_docs = seed_docs[perm_seed]
-    #     # seed_label = seed_label[perm_seed]
+    if args.data == "generate":
 
 
-    #     if args.model == "bert":
-    #         seed_docs = tokenizeText(x, vocabulary_inv_list)
-    #         # seed_docs = tokenizeText(seed_docs_numpy, vocabulary_inv_list)
+        if args.model == 'rnn':
+            x = x[:, :doc_len, :sent_len]
+            sequence_length = [doc_len, sent_len]
+        elif args.model == 'cnn':
+            x = x[:, :max_seq_len_cnn]
+            sequence_length = max_seq_len_cnn
+
+        print("\n### Input preparation ###")
+        embedding_mat = np.load('data/embedding_mat.npy')
+
+        print("\n### Phase 1: vMF distribution fitting & pseudo document generation ###")
+        seed_docs, seed_label = generate_pseudocs(args.model, embedding_mat, word_sup_list, vocabulary_inv_list, 
+                                                word_counts, sequence_length, vocabulary, len_avg, len_std)
+        np.save("seed_docs_numpy_cnn", seed_docs)
+        np.save("seed_label_cnn", seed_label)
+        print().shape
+
+        perm_seed = np.random.permutation(len(seed_label))
+        seed_docs = seed_docs[perm_seed]
+        seed_label = seed_label[perm_seed]
+
+
+        if args.model == "bert":
+            seed_docs = tokenizeText(x, vocabulary_inv_list)
+            # seed_docs = tokenizeText(seed_docs_numpy, vocabulary_inv_list)
 
 
     elif args.data == "load":
         if args.model == "rnn":
             seed_docs_numpy = np.load('data/seed_docs.npy')
             seed_label = np.load('data/seed_label.npy')
+            seed_docs = torch.from_numpy(seed_docs_numpy)
+
+        if args.model == "cnn":
+            seed_docs_numpy = np.load('seed_docs_numpy_cnn.npy')
+            seed_label = np.load('seed_label_cnn.npy')
             seed_docs = torch.from_numpy(seed_docs_numpy)
 
         if args.model == "bert":
@@ -104,7 +126,7 @@ def main():
     embedding_mat = np.load('data/embedding_mat.npy')
 
     # lr = 0.01 if args.model == 'rnn' else 0.0001
-    lr = 0.01 if args.model == 'rnn' else 0.0001
+    lr = 0.01 if args.model in ('rnn', 'cnn') else 0.0001
     wstc = WSTC(input_shape=xshape,
                 model=args.model,
                 batch_size=args.batch_size,
@@ -114,7 +136,7 @@ def main():
                 learning_rate=lr)
 
     if args.method == "pretrain" or args.method == "both":
-        train_data = DataWrapper(seed_docs, seed_label) if args.model == 'rnn' else BertDataWrapper(seed_docs, seed_label)
+        train_data = DataWrapper(seed_docs, seed_label) if args.model in ('rnn', 'cnn') else BertDataWrapper(seed_docs, seed_label)
         train_loader = DataLoader(dataset=train_data, batch_size=args.batch_size, shuffle=True)
         wstc.pretrain(train_loader, args.pretrain_epochs)
 
@@ -168,16 +190,20 @@ def main():
 
     if args.evaluate:
 
-        docs_path = "data/real_docs_full.npy"
-        labels_path = "data/real_labels_full.npy"
+        # docs_path = "data/real_docs_full.npy"
+        # labels_path = "data/real_labels_full.npy"
+        docs_path = "cnn_x.npy"
+        labels_path = "cnn_y.npy"
 
         # Load saved model
-        model = torch.load('finetuned_model.pt')
+        model = torch.load('model.pt')
 
         # Load real documents
         x = np.load(docs_path)
         y = np.load(labels_path)
-        x = x[:, :10, :45]
+        print(x.shape)
+        # x = x[:, :10, :45]
+        x = x[:100]
 
         if args.model == 'bert':
             vocabulary_inv_list = np.load('vocabulary_inv_list.npy')
@@ -186,7 +212,7 @@ def main():
         # x = x[:, :10, :45]
 
         # Convert to batches of tensors
-        test_data = DataWrapper(x, y) if args.model == 'rnn' else BertDataWrapper(x, y)
+        test_data = DataWrapper(x, y) if args.model in ('rnn', 'cnn') else BertDataWrapper(x, y)
         test_loader = DataLoader(dataset=test_data,
                                  batch_size=args.batch_size,
                                  shuffle=False)

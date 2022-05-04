@@ -211,9 +211,9 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
     print(seed_labels.shape)
     print(seed_attention_mask.shape)
     print(seed_docs_input_ids.shape)
-    print(seed_docs)
-    np.save("seed_docs_bert.npy", seed_docs)
-    np.save("seed_labels_bert.npy", seed_labels)
+    # print(seed_docs)
+    # np.save("seed_docs_bert.npy", seed_docs)
+    # np.save("seed_labels_bert.npy", seed_labels)
     print().shape
     
     return encoded_data, y, seed_docs, seed_labels

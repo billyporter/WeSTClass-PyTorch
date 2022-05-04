@@ -157,6 +157,7 @@ class WSTC():
                         document = document.cuda()
                         label = label.cuda()
                         
+                    document = Variable(document)
                     feature = self.classifier(document)
 
                 elif self.model == 'bert':

@@ -8,7 +8,6 @@ class ConvolutionLayer(nn.Module):
 
         self.emb_layer = nn.Embedding(vocab_sz, embedding_dim)
         self.emb_layer.weights = torch.nn.Parameter(torch.from_numpy(embedding_mat))
-        self.conv1 = nn.Conv1d(100, num_filters, kernel_size=2, stride=1, padding=0)
 
         self.relu = nn.ReLU(True)
         self.max_pool = nn.AdaptiveMaxPool1d(output_size=1)
@@ -16,7 +15,7 @@ class ConvolutionLayer(nn.Module):
         self.dense_1 = nn.Linear(in_features=num_filters * len(filter_sizes), out_features=hidden_dim)
         self.dense_2 = nn.Linear(in_features=hidden_dim, out_features=4)
         self.softmax_layer = nn.LogSoftmax(dim=1)
-        self.conv_blocks = []
+        self.conv_blocks = nn.ModuleList()
         for sz in filter_sizes:
             conv = nn.Conv1d(100, num_filters, kernel_size=sz, stride=1, padding=0)
             self.conv_blocks.append(conv)

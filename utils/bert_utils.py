@@ -10,6 +10,7 @@ import torch
 from statistics import mean
 from utils.datahelper import DataWrapper, BertDataWrapper
 import random
+from os.path import join
 import spherecluster
 from spherecluster import SphericalKMeans, VonMisesFisherMixture, sample_vMF
 from time import time
@@ -47,17 +48,20 @@ def preprocess_doc(data):
 
 def get_statistics(data):
     
+    data = [s.split(" ") for s in data]
+    tmp_list = [len(doc) for doc in data]
+
     doc_lens_list = [len(row) for row in data]
-    max_len = max(doc_lens_list)
-    avg_len = np.average(doc_lens_list)
-    std_len = np.std(doc_lens_list)
+    max_len = max(tmp_list)
+    avg_len = np.average(tmp_list)
+    std_len = np.std(tmp_list)
 
     print("----------------------------------------}")
     print("Max document length: {}".format(max_len))
     print("Average document length: {}".format(avg_len))
     print("St. Dev document length: {}".format(std_len))
 
-    real_len = min(int(avg_len + 2 * std_len), max_len)
+    real_len = min(int(avg_len + 3 * std_len), max_len)
     print("Defined document length: {}".format(real_len))
     print('Fraction of truncated sentences: {}'.format(sum(tmp > real_len for tmp in doc_lens_list)/len(doc_lens_list)))
 
@@ -68,27 +72,97 @@ def get_statistics(data):
 
     return real_len, pseudo_len
 
-def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation=True, gen_seed_docs="generate"):
+def extract_keywords(data_path, num_keywords, data, perm):
+    sup_data = []
+    sup_idx = []
+    sup_label = []
+    file_name = 'doc_id.txt'
+    infile = open(join(data_path, file_name), mode='r', encoding='utf-8')
+    text = infile.readlines()
+    print(data[0])
+    for i, line in enumerate(text):
+        line = line.split('\n')[0]
+        class_id, doc_ids = line.split(':')
+        assert int(class_id) == i
+        seed_idx = doc_ids.split(',')
+        seed_idx = [int(idx) for idx in seed_idx]
+        sup_idx.append(seed_idx)
+        for idx in seed_idx:
+            print(data[idx])
+            sup_data.append(" ".join(data[idx]))
+            sup_label.append(i)
+    print(sup_data)
 
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    import nltk
+
+    tfidf = TfidfVectorizer(norm='l2', sublinear_tf=True, max_df=0.2, stop_words='english')
+    sup_x = tfidf.fit_transform(sup_data)
+    sup_x = np.asarray(sup_x.todense())
+
+    vocab_dict = tfidf.vocabulary_
+    vocab_inv_dict = {v: k for k, v in vocab_dict.items()}
+
+    print("\n### Supervision type: Labeled documents ###")
+    print("Extracted keywords for each class: ")
+    keywords = []
+    cnt = 0
+    for i in range(len(sup_idx)):
+        class_vec = np.average(sup_x[cnt:cnt+len(sup_idx[i])], axis=0)
+        cnt += len(sup_idx[i])
+        sort_idx = np.argsort(class_vec)[::-1]
+        keyword = []
+        j = 0
+        k = 0
+        while j < num_keywords:
+            w = vocab_inv_dict[sort_idx[k]]
+            keyword.append(vocab_inv_dict[sort_idx[k]])
+            j += 1
+            k += 1
+        print("Class {}:".format(i))
+        print(keyword)
+        keywords.append(keyword)
+
+    new_sup_idx = []
+    m = {v: k for k, v in enumerate(perm)}
+    for seed_idx in sup_idx:
+        new_seed_idx = []
+        for ele in seed_idx:
+            new_seed_idx.append(m[ele])
+        new_sup_idx.append(new_seed_idx)
+    new_sup_idx = np.asarray(new_sup_idx)
+
+    return keywords, new_sup_idx
+
+def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation=True, gen_seed_docs="generate"):
+    print('HERE')
     data_path = 'data/' + dataset_name
     data, y = read_file(data_path, with_evaluation)
-    data = data[:100] # Delete later
-    y = y[:100]
-    print(data)
+    # data = data[:100] # Delete later
+    # y = y[:100]
 
     # Clean data
-    random.shuffle(data)
     data = preprocess_doc(data)
 
     # Get data statistics
-    real_len, psuedo_len = get_statistics(data)
+    real_len, pseudo_len = get_statistics(data)
+    print(real_len, pseudo_len)
 
     # Add keywords to end sentence
-    keywords = load_keywords(data_path, sup_source)
+    if sup_source in ("labels", "keywords"):
+        keywords = load_keywords(data_path, sup_source)
+    elif sup_source == "docs":
+        sz = len(data)
+        np.random.seed(1234)
+        perm = perm = np.random.permutation(sz)
+        data_copy = [s.split(" ") for s in data]
+        keywords, sup_idx = extract_keywords(data_path, 10, data_copy, perm)
     keywords_sents = [" ".join(sent) for sent in keywords]
     print(keywords)
     print('Done preprocessing...')
+    data = data[:100]
 
+    random.shuffle(data) # DELETE LATER
     # Tokenize data
     print("Converting text to tokens...")
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
@@ -180,6 +254,7 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
                 class_encodes.append(encoding)
             keyword_embeds.append(class_embeds)
             keyword_encodes.append(class_encodes)
+    print("Finished Embedding Generation...")
 
     seed_docs_input_ids = []
     seed_labels = []
@@ -196,7 +271,7 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
         num_doc_per_class = 500
         vocab_size = 50
         interp_weight = 0.2
-        sequence_length = psuedo_len
+        sequence_length = pseudo_len
         doc_settings = (num_doc_per_class, vocab_size, interp_weight, real_len, sequence_length)
         seed_docs_input_ids, seed_labels = \
             psuedodocs_bert(embedding_mat, encode_count_dict,
@@ -214,7 +289,7 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
     # print(seed_docs)
     # np.save("seed_docs_bert.npy", seed_docs)
     # np.save("seed_labels_bert.npy", seed_labels)
-    print().shape
+    # print().shape
     
     return encoded_data, y, seed_docs, seed_labels
 

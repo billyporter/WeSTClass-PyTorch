@@ -12,9 +12,7 @@ import itertools
 from collections import Counter
 from os.path import join
 from nltk import tokenize
-# from sklearn.feature_extraction.text import CountVectorizer
-# from sklearn.feature_extraction.text import TfidfTransformer
-
+from gensim.models import word2vec
 
 def read_file(data_dir, with_evaluation):
     data = []
@@ -337,3 +335,47 @@ def load_dataset(model, sup_source="keywords", with_evaluation=True, truncate_le
         return load_cnn("agnews", sup_source, with_evaluation=with_evaluation, truncate_len=truncate_len)
     if model == 'rnn':
         return load_rnn("agnews", sup_source, with_evaluation=with_evaluation, truncate_len=truncate_len)
+
+
+def train_word2vec(sentence_matrix, vocabulary_inv, dataset_name, mode='skipgram',
+                   num_features=100, min_word_count=5, context=5):
+    model_dir = 'data/' + dataset_name
+    model_name = "embedding"
+    model_name = os.path.join(model_dir, model_name)
+    print(model_name)
+    print(os.path.exists(model_name))
+    if os.path.exists(model_name):
+        embedding_model = word2vec.Word2Vec.load(model_name)
+        print("Loading existing Word2Vec model {}...".format(model_name))
+    else:
+        num_workers = 15  # Number of threads to run in parallel
+        downsampling = 1e-3  # Downsample setting for frequent words
+        print('Training Word2Vec model...')
+
+        sentences = [[vocabulary_inv[w] for w in s] for s in sentence_matrix]
+        if mode == 'skipgram':
+            sg = 1
+            print('Model: skip-gram')
+        elif mode == 'cbow':
+            sg = 0
+            print('Model: CBOW')
+        embedding_model = word2vec.Word2Vec(sentences, workers=num_workers, sg=sg,
+                                            size=num_features, min_count=min_word_count,
+                                            window=context, sample=downsampling)
+
+        embedding_model.init_sims(replace=True)
+
+        if not os.path.exists(model_dir):
+            os.makedirs(model_dir)
+        print("Saving Word2Vec model {}".format(model_name))
+        embedding_model.save(model_name)
+
+    print(embedding_model)
+    embedding_weights = {}
+    for key, word in vocabulary_inv.items():
+        if word in embedding_model.wv.key_to_index:
+            value = embedding_model.wv[word]
+        else:
+            value = np.random.uniform(-0.25, 0.25, embedding_model.vector_size)
+        embedding_weights[key] = value
+    return embedding_weights

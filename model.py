@@ -14,10 +14,9 @@ from architectures.transformer import *
 
 class WSTC():
     def __init__(self,
-                 input_shape,
                  n_classes=4,
                  model='rnn',
-                 vocab_sz=None,
+                 vocab_sz=67765,
                  word_embedding_dim=100,
                  embedding_matrix=None,
                  batch_size=256,
@@ -42,14 +41,13 @@ class WSTC():
         if self.is_cuda:
             self.classifier = self.classifier.cuda()
 
-        self.input_shape = input_shape
         self.n_classes = n_classes
         self.optimizer = optim.Adam(self.classifier.parameters(), lr=learning_rate)
         # self.optimizer  = torch.optim.SGD(filter(lambda p: p.requires_grad, self.classifier.parameters()), lr=0.01, momentum=0.9)
         # self.optimizer = optim.SGD(self.classifier.parameters(), lr=0.01, momentum=0.9)
         self.criterion = nn.KLDivLoss(reduction='batchmean')
 
-    ### Make predictions on large dataset ###
+    ### Generates predictions and class scores ###
     def predict(self, x):
         q_list = []
         preds_list = []
@@ -69,13 +67,13 @@ class WSTC():
                     mask = mask.cuda()
                 pred = self.classifier(input_id, mask)
 
-            # document = Variable(document)
             preds_numpy = torch.exp(pred).cpu().detach().numpy()
             guesses = torch.argmax(pred.cpu(), dim=1)
             q_list.extend(preds_numpy)
             preds_list.extend(guesses)
         return q_list, preds_list
 
+    ### Scores accuracy of model ###
     def evaluate_dataset(self, test_loader, get_stats=False, get_other=True):
         test_correct = 0
         confidence_list = []
@@ -131,6 +129,8 @@ class WSTC():
 
     def pretrain(self, train_loader, epochs, output_save_path='pretrain_output.txt', model_save_path="model.pt"):
         pretrain_output_file = open(output_save_path, 'w')
+        output_save_path = "{}_pretrain_output.txt".format(self.model)
+        model_save_path = "{}_model.pt".format(self.model)
         t0 = time()
         best_dev_loss = None
         print('\nPretraining...')
@@ -144,11 +144,9 @@ class WSTC():
             for i, (document, label) in enumerate(tqdm(train_loader)):
                 if self.model == 'rnn':
                     self.classifier._init_hidden_state(self.batch_size)
-                    
                     if self.is_cuda:
                         document = document.cuda()
                         label = label.cuda()
-                        
                     document = Variable(document)
                     feature = self.classifier(document)
 
@@ -156,31 +154,23 @@ class WSTC():
                     if self.is_cuda:
                         document = document.cuda()
                         label = label.cuda()
-                        
                     document = Variable(document)
                     feature = self.classifier(document)
 
                 elif self.model == 'bert':
                     input_id, mask = document
-                    
                     if self.is_cuda:
                         input_id = input_id.cuda()
                         mask = mask.cuda()
                         label = label.cuda()
-
                     feature = self.classifier(input_id, mask)
 
-                # Get categorical target
-                train_correct += binary_accuracy(feature.cpu().detach(),
-                                                label.cpu().detach(),
-                                                method="train")
-
-                # Compute Loss
+                # Get batch accuracy
+                train_correct += binary_accuracy(feature.cpu().detach(), label.cpu().detach(), method="train")
                 loss = self.criterion(feature, label)
 
                 # Clear gradient in optimizer
                 self.optimizer.zero_grad()
-                # torch.nn.utils.clip_grad_norm_(self.classifier.parameters(), 5)
                 loss.backward()
 
                 # Do one step of gradient descent
@@ -213,18 +203,19 @@ class WSTC():
                    output_save_path='selftrain_output.txt',
                    model_save_path="finetuned_model.pt"):
 
+        # Get predictions and scores across classes
         q, y_preds = self.predict(train_loader)
         y_preds = np.asarray(y_preds)
         y_preds_last = np.copy(y_preds)
 
-        # Open file
+        # Pre loop variables
+        output_save_path = "{}_selftrain_output.txt".format(self.model)
+        model_save_path = "{}_model.pt".format(self.model)
         selftrain_file = open(output_save_path, 'w')
         t0 = time()
-
         index = 0
-        x_length = x.shape[0]if self.model == 'rnn' else len(x)
+        x_length = x.shape[0] if self.model in ('rnn', 'cnn') else len(x)
         index_array = np.arange(x_length)
-        # index_array = np.arange(200)
         for ite in tqdm(range(int(maxiter))):
             if ite % update_interval == 0:
                 if ite != 0:
@@ -257,9 +248,6 @@ class WSTC():
             # Train on a singular batch
             idx = index_array[index * self.batch_size:min((index + 1) * self.batch_size, x_length)]
             
-            # print(index_array[index * self.batch_size:min((index + 1) * self.batch_size, x_length)])
-            # print(idx)
-            # print(x)
             if len(idx):
                 self.train_on_batch(x=x[idx[0]:idx[-1]], y=p[idx[0]:idx[-1]], batch_size=self.batch_size)
 
@@ -285,18 +273,22 @@ class WSTC():
                 if self.is_cuda:
                     document = document.cuda()
                     label = label.cuda()
-                    
+                document = Variable(document)
+                feature = self.classifier(document)
+                
+            elif self.model == 'cnn':
+                if self.is_cuda:
+                    document = document.cuda()
+                    label = label.cuda()
                 document = Variable(document)
                 feature = self.classifier(document)
 
             elif self.model == 'bert':
                 input_id, mask = document
-                
                 if self.is_cuda:
                     input_id = input_id.cuda()
                     mask = mask.cuda()
                     label = label.cuda()
-
                 feature = self.classifier(input_id, mask)
 
             # Get categorical target
@@ -313,65 +305,6 @@ class WSTC():
             # Do one step of gradient descent
             self.optimizer.step()
             train_loss += loss.item()
-
-    def pretrain_with_test(self,
-                           train_loader,
-                           epochs,
-                           test_loader,
-                           output_save_path='pretrain_output.txt',
-                           model_save_path="model.pt"):
-        pretrain_output_file = open(output_save_path, 'w')
-        t0 = time()
-        best_dev_loss = None
-        print('\nPretraining...')
-        print('\nPretraining...', file=pretrain_output_file)
-        print("Evaluating dataset...")
-        self.evaluate_dataset(test_loader)
-        for epoch in range(epochs):
-            print('------EPOCH: ' + str(epoch) + '-------')
-            print('------EPOCH: ' + str(epoch) + '-------', file=pretrain_output_file)
-            train_loss = 0.
-            train_correct = 0
-            for i, (document, label) in enumerate(tqdm(train_loader)):
-                self.classifier._init_hidden_state(self.batch_size)
-                if self.is_cuda:
-                    document = document.cuda()
-                    label = label.cuda()
-                document = Variable(document)
-
-                feature = self.classifier(document)
-
-                # Get categorical target
-                train_correct += binary_accuracy(feature.cpu().detach(), label.cpu().detach(), method="train")
-
-                # Compute Loss
-                loss = self.criterion(feature, label)
-
-                # Clear gradient in optimizer
-                self.optimizer.zero_grad()
-                loss.backward()
-
-                # Do one step of gradient descent
-                self.optimizer.step()
-                train_loss += loss.item()
-
-            print("Evaluating dataset...")
-            self.evaluate_dataset(test_loader)
-
-            print('Epoch ({}) Train accuracy: {}'.format(epoch, train_correct / len(train_loader.dataset)))
-            print('Epoch ({}) Train accuracy: {}'.format(epoch, train_correct / len(train_loader.dataset)), file=pretrain_output_file)
-            print('Epoch ({}) Train loss: {}'.format(epoch, train_loss))
-            print('Epoch ({}) Train loss: {}'.format(epoch, train_loss), file=pretrain_output_file)
-
-            if best_dev_loss is None or train_loss < best_dev_loss:
-                print('Saving...')
-                torch.save(self.classifier, model_save_path)
-                best_dev_loss = train_loss
-
-        # Close output file
-        print('Pretraining time: {:.2f}s'.format(time() - t0))
-        print('Pretraining time: {:.2f}s'.format(time() - t0), file=pretrain_output_file)
-        pretrain_output_file.close()
         
     
     def target_distribution(self, q, power=2):

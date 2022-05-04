@@ -8,6 +8,7 @@ from torch.autograd import Variable
 from time import time
 from utils.datahelper import *
 from architectures.han import *
+from architectures.cnn import *
 from architectures.transformer import *
 
 
@@ -27,6 +28,9 @@ class WSTC():
 
         if model == 'rnn':
             self.classifier = HierAttLayer(vocab_sz, word_embedding_dim,
+                                       embedding_matrix)
+        elif model == 'cnn':
+            self.classifier = ConvolutionLayer(vocab_sz, word_embedding_dim,
                                        embedding_matrix)
         elif model == 'bert':
             self.classifier = BertClassifier()
@@ -85,6 +89,12 @@ class WSTC():
                 if self.is_cuda:
                     document = document.cuda()
                 feature = self.classifier(document)
+            elif self.model == 'cnn':
+                if self.is_cuda:
+                    document = document.cuda()
+                    label = label.cuda()
+                    
+                feature = self.classifier(document)
             elif self.model == 'bert':
                 input_id, mask = document
                 if self.is_cuda:
@@ -140,6 +150,13 @@ class WSTC():
                         label = label.cuda()
                         
                     document = Variable(document)
+                    feature = self.classifier(document)
+
+                elif self.model == 'cnn':
+                    if self.is_cuda:
+                        document = document.cuda()
+                        label = label.cuda()
+                        
                     feature = self.classifier(document)
 
                 elif self.model == 'bert':

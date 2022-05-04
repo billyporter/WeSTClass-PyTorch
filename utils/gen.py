@@ -91,7 +91,7 @@ def label_expansion(class_labels, write_path, vocabulary_inv, embedding_mat):
 
 
 def pseudodocs(word_sup_array, total_num, background_array, sequence_length, len_avg,
-                len_std, num_doc, interp_weight, vocabulary_inv, embedding_mat, model='rnn', save_dir=None):
+                len_std, num_doc, interp_weight, vocabulary_inv, embedding_mat, model='cnn', save_dir=None):
     
     for i in range(len(embedding_mat)):
         embedding_mat[i] = embedding_mat[i] / np.linalg.norm(embedding_mat[i])
@@ -101,7 +101,29 @@ def pseudodocs(word_sup_array, total_num, background_array, sequence_length, len
 
     print("Pseudo documents generation...")
     background_vec = interp_weight * background_array
-    if model == 'rnn':
+    if model == 'cnn':
+        docs = np.zeros((num_doc*len(word_sup_array), sequence_length), dtype='int32')
+        label = np.zeros((num_doc*len(word_sup_array), len(word_sup_array)))
+        for i in range(len(word_sup_array)):
+            docs_len = len_avg*np.ones(num_doc)
+            center = centers[i]
+            kappa = kappas[i]
+            discourses = sample_vMF(center, kappa, num_doc)
+            for j in range(num_doc):
+                discourse = discourses[j]
+                prob_vec = np.dot(embedding_mat, discourse)
+                prob_vec = np.exp(prob_vec)
+                sorted_idx = np.argsort(prob_vec)[::-1]
+                delete_idx = sorted_idx[total_num:]
+                prob_vec[delete_idx] = 0
+                prob_vec /= np.sum(prob_vec)
+                prob_vec *= 1 - interp_weight
+                prob_vec += background_vec
+                doc_len = int(docs_len[j])
+                docs[i*num_doc+j][:doc_len] = np.random.choice(len(prob_vec), size=doc_len, p=prob_vec)
+                label[i*num_doc+j] = interp_weight/len(word_sup_array)*np.ones(len(word_sup_array))
+                label[i*num_doc+j][i] += 1 - interp_weight
+    elif model == 'rnn':
         docs = np.zeros((num_doc*len(word_sup_array), sequence_length[0], sequence_length[1]), dtype='int32')
         label = np.zeros((num_doc*len(word_sup_array), len(word_sup_array)))
         doc_len = int(len_avg[0])
@@ -133,7 +155,7 @@ def pseudodocs(word_sup_array, total_num, background_array, sequence_length, len
     return docs, label
 
 
-def generate_pseudocs(embedding_mat, word_sup_list, vocabulary_inv_list, word_counts, sequence_length, vocabulary, len_avg, len_std):
+def generate_pseudocs(model, embedding_mat, word_sup_list, vocabulary_inv_list, word_counts, sequence_length, vocabulary, len_avg, len_std):
 
     np.random.seed(1234)
     vocabulary_inv = {key: value for key, value in enumerate(vocabulary_inv_list)}
@@ -151,13 +173,11 @@ def generate_pseudocs(embedding_mat, word_sup_list, vocabulary_inv_list, word_co
     total_counts = sum(word_counts[ele] for ele in word_counts)
     total_counts -= word_counts[vocabulary_inv_list[0]]
     background_array = np.zeros(vocab_sz)
-    for i in range(0,vocab_sz):
+    for i in range(1,vocab_sz):
         background_array[i] = word_counts[vocabulary_inv[i]]/total_counts
-    background_array = np.true_divide(background_array, total_counts)
-    print('background array: ', background_array)
     
     seed_docs, seed_label = pseudodocs(word_sup_array, gamma, background_array,
                                             sequence_length, len_avg, len_std, beta, alpha, 
-                                            vocabulary_inv, embedding_mat)
+                                            vocabulary_inv, embedding_mat, model=model)
 
     return seed_docs, seed_label

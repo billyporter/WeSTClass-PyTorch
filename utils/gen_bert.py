@@ -1,6 +1,11 @@
 import numpy as np
 import torch
 import torch.nn as nn
+def warn(*args, **kwargs):
+    pass
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.warn = warn
 import spherecluster
 from spherecluster import SphericalKMeans, VonMisesFisherMixture, sample_vMF
 
@@ -60,6 +65,7 @@ def label_expansion_bert(embedding_mat, embed_encode_dict, keyword_embeds, keywo
 
     # Get Average Embedding of keywords
     avg_embeddings = []
+    # embedding_mat = sorted(embedding_mat)
     for class_embeds in keyword_embeds:
         word_embeddings = torch.zeros((len(class_embeds), 768))
         for j, embed in enumerate(class_embeds):
@@ -70,22 +76,39 @@ def label_expansion_bert(embedding_mat, embed_encode_dict, keyword_embeds, keywo
     #### Generate psuedo document vocabulary ####
     words_list = []
     all_class_labels = []
-    sz = 3
-    # Stop when a word is shared between classes
+    sz = 0
+    # Stop when an embedding is shared between classes
     while len(all_class_labels) == len(set(all_class_labels)):
         sz += 1
-        expanded_array, exp_debug = seed_expansion_bert(sz, embedding_mat, avg_embeddings, embed_encode_dict, keyword_embeds, keyword_encodes)
-        all_class_labels = [w for w_class in exp_debug for w in w_class]
-    expanded_array, exp_debug = seed_expansion_bert(sz - 1, embedding_mat, avg_embeddings, embed_encode_dict, keyword_embeds, keyword_encodes)
+        expanded_array, exp_debug, debug2 = seed_expansion_bert(sz, embedding_mat, avg_embeddings, embed_encode_dict, keyword_embeds, keyword_encodes)
+        # all_class_labels = [w for w_class in exp_debug for w in w_class]
+        # print(all_class_labels)
+        all_class_labels = [w for w_class in debug2 for w in w_class]
+        all_class_debugs = [w for w_class in exp_debug for w in w_class]
+        print(len(all_class_labels), len(set(all_class_labels)))
+        print(len(all_class_debugs), len(set(all_class_debugs)))
+        print(all_class_debugs)
+        # print(all_class_labels)
+    # expanded_array, exp_debug = seed_expansion_bert(sz - 1, embedding_mat, avg_embeddings, embed_encode_dict, keyword_embeds, keyword_encodes)
+    label_dict = {}
+    for i, label in enumerate(all_class_labels):
+        if label in label_dict:
+            print('-----DUPE------')
+            print(i)
+            print(label_dict[label])
+            print(tokenizer.decode(all_class_debugs[i]))
+            print(tokenizer.decode(all_class_debugs[label_dict[label]]))
+        label_dict[label] = i
     print("Final expansion size t = {}".format(len(expanded_array[0])))
 
     # Decode class labels (Delete Later)
     print("Size: ", sz - 1)
     for class_label in exp_debug:
+        for word in class_label:
+            print("word: ", tokenizer.decode(word))
         decoded_text = tokenizer.decode(class_label)
         print(decoded_text)
         print()
-
 
     centers = []
     kappas = []
@@ -110,6 +133,8 @@ def label_expansion_bert(embedding_mat, embed_encode_dict, keyword_embeds, keywo
 def seed_expansion_bert(sz, embedding_mat, avg_embeddings, embed_encode_dict, keyword_embeds, keyword_encodes):
     expanded_seed_debug = []
     expanded_seed = []
+    expanded_seed_debug2 = []
+    # embedding_mat = sorted(embeddin)
     for i in range(0, len(keyword_embeds)):
 
         # Get most similar words to keywords
@@ -120,7 +145,7 @@ def seed_expansion_bert(sz, embedding_mat, avg_embeddings, embed_encode_dict, ke
         words_added = 0
         word_index = 0
 
-        # Add most simialr keywords until size reached
+        # Add most similar keywords until size reached
         while words_added < sz:
             embedding_index = word_expanded[word_index]
             embedding = tuple(embedding_mat[embedding_index].tolist())
@@ -132,4 +157,5 @@ def seed_expansion_bert(sz, embedding_mat, avg_embeddings, embed_encode_dict, ke
             word_index += 1
         expanded_seed_debug.append(np.array(expanded_class_encodings))
         expanded_seed.append(np.array(expanded_class_embeds))
-    return expanded_seed, expanded_seed_debug
+        expanded_seed_debug2.append(expanded_class_embeds)
+    return expanded_seed, expanded_seed_debug, expanded_seed_debug2

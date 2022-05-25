@@ -3,6 +3,11 @@ from tkinter.filedialog import test
 from transformers import BertTokenizer, BertModel, DistilBertModel, DistilBertTokenizer
 from tqdm import tqdm
 from torch.utils.data import DataLoader
+def warn(*args, **kwargs):
+    pass
+import warnings
+warnings.warn = warn
+from sklearn.model_selection import StratifiedShuffleSplit
 import numpy as np
 import re
 import torch
@@ -13,6 +18,7 @@ from time import time
 from utils.gen_bert import *
 from utils.load_data import read_file, load_keywords
 from utils.datahelper import DataWrapper, BertDataWrapper
+import sys
 
 def clean_str(string):
     string = re.sub(r"[^A-Za-z0-9(),.!?_\"\'\`]", " ", string)
@@ -48,7 +54,7 @@ def get_statistics(data):
     print("----------------------------------------}")
 
 
-    return real_len, pseudo_len
+    return real_len, pseudo_len, max_len
 
 def extract_keywords(data_path, num_keywords, data, perm):
     sup_data = []
@@ -57,7 +63,7 @@ def extract_keywords(data_path, num_keywords, data, perm):
     file_name = 'doc_id.txt'
     infile = open(join(data_path, file_name), mode='r', encoding='utf-8')
     text = infile.readlines()
-    print(data[0])
+
     for i, line in enumerate(text):
         line = line.split('\n')[0]
         class_id, doc_ids = line.split(':')
@@ -69,7 +75,6 @@ def extract_keywords(data_path, num_keywords, data, perm):
             print(data[idx])
             sup_data.append(" ".join(data[idx]))
             sup_label.append(i)
-    print(sup_data)
 
     from sklearn.feature_extraction.text import TfidfVectorizer
     import nltk
@@ -112,15 +117,50 @@ def extract_keywords(data_path, num_keywords, data, perm):
 
     return keywords, new_sup_idx
 
-def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation=True, gen_seed_docs="generate", batch_size=8):
+def reduce_data(x, y, num_examples, num_classes):
+    class_perms_list = []
+    old_class_sz = len(x) // num_classes
+    for i in range(1, num_classes + 1):
+        indices = np.arange((i - 1) * old_class_sz, i * old_class_sz)
+        perm = np.random.permutation(indices)
+        class_perms_list.extend(perm[:num_examples])
+    p = np.asarray(class_perms_list)
+    x = np.asarray(x)[p]
+    y = np.asarray(y)[p]
+
+    return list(x), list(y)
+
+def reduce_embeddings(embed_encode_dict, encode_count_dict, n):
+    embed_list = embed_encode_dict.keys()
+
+    # 1) Construct list of embeddings counts
+    embeddings_counts = [encode_count_dict[embed_encode_dict[embed]] 
+        for embed in embed_list]
+
+    # 2) Get how indices should be sorted
+    sorted_indices = np.argsort(embeddings_counts)
+
+    # 3) Get corresponding embeddings and encodings
+    embedding_mat = np.array(list(embed_encode_dict.keys()))[sorted_indices]
+    encode_list = np.array(list(embed_encode_dict.values()))[sorted_indices]
+    # embedding_mat = embedding_mat[:n]
+    # encode_list = encode_list[:n]
+
+    return embedding_mat, encode_list
+
+def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation=True, gen_seed_docs="generate", batch_size=16):
     data_path = 'data/' + dataset_name
-    data, y = read_file(data_path, with_evaluation)
+    data, y_full = read_file(data_path, with_evaluation)
 
     # Clean data
-    data = preprocess_doc(data)
+    data_full = preprocess_doc(data)
+
+    # Get subset of data for embeddings
+    data, y = reduce_data(data_full, y_full, 10000, 4)
+    print(len(data))
 
     # Get data statistics
-    real_len, pseudo_len = get_statistics(data)
+    real_len, pseudo_len, embedding_len = get_statistics(data)
     print(real_len, pseudo_len)
 
     # Add keywords to end sentence
@@ -129,7 +169,7 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
     elif sup_source == "docs":
         sz = len(data)
         np.random.seed(1234)
-        perm = perm = np.random.permutation(sz)
+        perm = np.random.permutation(sz)
         data_copy = [s.split(" ") for s in data]
         keywords, sup_idx = extract_keywords(data_path, 10, data_copy, perm)
     keywords_sents = [" ".join(sent) for sent in keywords]
@@ -139,8 +179,9 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
     # Tokenize data
     print("Converting text to tokens...")
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-    encoded_data = tokenizer(data, padding='max_length', max_length=real_len, truncation=True,)
-    encoded_keywords = tokenizer(keywords_sents, padding='max_length', max_length=real_len, truncation=True)
+    encoded_data = tokenizer(data, padding='max_length', max_length=embedding_len, truncation=True,)
+    # encoded_data_full = tokenizer(data_full, padding='max_length', max_length=real_len, truncation=True,)
+    encoded_keywords = tokenizer(keywords_sents, padding='max_length', max_length=embedding_len, truncation=True)
     print('Done tokenizing...')
 
     # Load pre-trained model (weights)
@@ -153,7 +194,6 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
     tokens_tensor = torch.tensor(encoded_data["input_ids"])
     segments_tensor = torch.tensor(encoded_data["token_type_ids"])
     bert_data = DataWrapper(tokens_tensor, segments_tensor)
-    # bert_data = BertDataWrapper(encoded_data)
     bert_loader = DataLoader(dataset=bert_data, batch_size=batch_size, shuffle=False)
 
     # Keywords model prep
@@ -165,6 +205,11 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
     encode_count_dict = {}
     keyword_embeds = []
     keyword_encodes = []
+
+    # Constants
+    PAD_encoding = 0
+    CLS_encoding = 101
+    SEP_encoding = 102
 
     print("Beginning Embedding Generation...")
     # Embedding loop
@@ -182,24 +227,23 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
 
             # Get second to last hidden state
             hidden_states = outputs[2]
-            last_hidden_state = hidden_states[-2]
+            last_hidden_state = hidden_states[-1]
 
             # Add embeddings to dictionary
             token_embeddings = torch.squeeze(last_hidden_state, dim=1)
             for i, document in enumerate(tokens_tensor):
                 for j, encoding in enumerate(document):
-                    word = tokenizer.decode(encoding)
-                    if word == "[ C L S ]":
+                    if encoding == CLS_encoding:
                         continue
-                    if word == "[ S E P ]":
+                    if encoding == SEP_encoding:
                         continue
-                    if word == "[ P A D ]":
+                    if encoding == PAD_encoding:
                         break
                     embedding = token_embeddings[i][j].cpu().numpy()
                     embedding = tuple(embedding / np.linalg.norm(embedding))
                     encoding = encoding.cpu().numpy().item()
                     embed_encode_dict[embedding] = encoding
-                    encode_count_dict[encoding] = encode_count_dict.get(encode, 0) + 1
+                    encode_count_dict[encoding] = encode_count_dict.get(encoding, 0) + 1
         
         # Keywords
         if torch.cuda.is_available():
@@ -208,36 +252,52 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
         
         outputs = model(tokens_tensor_keywords, segments_tensor_keywords)
         hidden_states = outputs[2]
-        last_hidden_state = hidden_states[-2]
+        last_hidden_state = hidden_states[-1]
         token_embeddings = torch.squeeze(last_hidden_state, dim=1)
         for i, document in enumerate(tokens_tensor_keywords):
             class_embeds = []
             class_encodes = []
             for j, encoding in enumerate(document):
-                word = tokenizer.decode(encoding)
-                if word == "[ C L S ]":
+                if encoding == CLS_encoding:
                     continue
-                if word == "[ S E P ]":
+                if encoding == SEP_encoding:
                     continue
-                if word == "[ P A D ]":
+                if encoding == PAD_encoding:
                     break
-                embedding = tuple(token_embeddings[i][j].tolist())
+                embedding = token_embeddings[i][j].tolist()
+                embedding = tuple(embedding / np.linalg.norm(embedding))
                 encoding = encoding.cpu().numpy().item()
                 class_embeds.append(embedding)
                 class_encodes.append(encoding)
             keyword_embeds.append(class_embeds)
             keyword_encodes.append(class_encodes)
     print("Finished Embedding Generation...")
+    print("encoded data size: ", sys.getsizeof(encoded_data))
+    print("embed dict size: ", sys.getsizeof(embed_encode_dict))
+    print("encode dict size: ", sys.getsizeof(encode_count_dict))
 
     seed_docs_input_ids = []
     seed_labels = []
     if gen_seed_docs == "generate":
         # Create embedding matrix
-        embedding_mat = np.array(list(embed_encode_dict.keys()))
+
+        # embedding_mat, encode_list = reduce_embeddings(embed_encode_dict, encode_count_dict, 50000)
+        embedding_mat = np.array(sorted(list(embed_encode_dict.keys())))
         encode_list = np.array(list(embed_encode_dict.values()))
+        # print("embed mat len: ", len(embedding_mat))
+        # print("embed mat size: ", sys.getsizeof(embedding_mat))
+        # np.save("t_embed_mat.npy", embedding_mat)
+        # np.save("t_encode_count_dict.npy", encode_count_dict)
+        # np.save("t_embed_encode_dict.npy", embed_encode_dict)
+        # np.save("t_keyword_encodes.npy", keyword_encodes)
+        # np.save("t_keyword_embeds.npy", keyword_embeds)
+        # np.save("t_encode_list.npy", encode_list)
+        # print().shape
 
         # Get VMF Distribution
         _, centers, kappas = label_expansion_bert(embedding_mat, embed_encode_dict, keyword_embeds, keyword_encodes, tokenizer)
+        np.save("t_centers.npy", centers)
+        np.save("t_kappas.npy", kappas)
 
         # Generate Pseudo Documents
         print("Pseudo documents generation...")
@@ -255,5 +315,29 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
         seed_attention_mask[:, :sequence_length] = 1
 
     seed_docs = {"input_ids": seed_docs_input_ids, "attention_mask": seed_attention_mask}
-    
-    return encoded_data, y, seed_docs, seed_labels
+    # encoded_data_full = {"input_ids": np.asarray(encoded_data_full["input_ids"]),
+    #  "attention_mask": np.asarray(encoded_data_full["attention_mask"])}
+    # return encoded_data_full, y_full, seed_docs, seed_labels
+    return encoded_data, y_full, seed_docs, seed_labels
+
+def tokenizeText(encoded_docs, vocabulary_inv_list):
+
+    vocabulary_inv = {key: value for key, value in enumerate(vocabulary_inv_list)}
+    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+
+    # Convert to text, drop pads
+    docs_text = []
+    print("Converting encoding to text...")
+    for doc in tqdm(encoded_docs):
+        temp_doc = []
+        for sent in doc:
+            for encoded_word in sent:
+                if encoded_word == 0:
+                    continue
+                temp_doc.append(vocabulary_inv[encoded_word])
+        docs_text.append(" ".join(temp_doc))
+    # print(docs_text)
+    print("Converting text to tokens...")
+    texts = [tokenizer(text,padding='max_length', max_length = 450, 
+                       truncation=True, return_tensors="pt") for text in tqdm(docs_text)]
+    return texts

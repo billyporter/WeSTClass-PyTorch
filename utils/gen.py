@@ -7,6 +7,15 @@
 import numpy as np
 import os
 np.random.seed(1234)
+#######################################
+# SphereCluster is not compatible with 
+# future version of SKLearn. This code
+# block is necessary to keep the output
+# readable
+def warn(*args, **kwargs):
+    pass
+import warnings
+warnings.warn = warn
 import spherecluster
 from spherecluster import SphericalKMeans, VonMisesFisherMixture, sample_vMF
 
@@ -181,3 +190,28 @@ def generate_pseudocs(model, embedding_mat, word_sup_list, vocabulary_inv_list, 
                                             vocabulary_inv, embedding_mat, model=model)
 
     return seed_docs, seed_label
+
+def augment(x, sup_idx, total_len):
+    print("Labeled documents augmentation...")
+    docs = x[sup_idx.flatten()]
+    curr_len = len(docs)
+    copy_times = int(total_len/curr_len) - 1
+    y = np.zeros(len(sup_idx.flatten()), dtype='int32')
+    label_nums = [len(seed_idx) for seed_idx in sup_idx]
+    cnt = 0
+    for i in range(len(sup_idx)):
+        y[cnt:cnt+label_nums[i]] = i
+        cnt += label_nums[i]
+
+    new_docs = docs
+    new_y = y
+    for i in range(copy_times):
+        new_docs = np.concatenate((new_docs, docs), axis=0)
+        new_y = np.concatenate((new_y, y), axis=0)
+
+    pretrain_labels = np.zeros((len(new_y),len(np.unique(y))))
+    for i in range(len(new_y)):
+        pretrain_labels[i][new_y[i]] = 1.0
+
+    print("Finished labeled documents augmentation.")
+    return new_docs, pretrain_labels

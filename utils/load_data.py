@@ -264,7 +264,8 @@ def load_rnn(dataset_name, sup_source, num_keywords=10, with_evaluation=True, tr
 
     if sup_source == 'labels' or sup_source == 'keywords':
         keywords = load_keywords(data_path, sup_source)
-        return x, y, word_counts, vocabulary, vocabulary_inv, len_avg, len_std, keywords, perm
+        sup_idx = None
+        return x, y, word_counts, vocabulary, vocabulary_inv, len_avg, len_std, keywords, sup_idx, perm
     elif sup_source == 'docs':
         if dataset_name == 'nyt':
             class_type = 'topic'
@@ -318,7 +319,8 @@ def load_cnn(dataset_name, sup_source, num_keywords=10, with_evaluation=True, tr
 
     if sup_source == 'labels' or sup_source == 'keywords':
         keywords = load_keywords(data_path, sup_source)
-        return x, y, word_counts, vocabulary, vocabulary_inv, len_avg, len_std, keywords, perm
+        sup_idx = None
+        return x, y, word_counts, vocabulary, vocabulary_inv, len_avg, len_std, keywords, sup_idx, perm
     elif sup_source == 'docs':
         if dataset_name == 'nyt':
             class_type = 'topic'

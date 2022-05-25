@@ -10,6 +10,7 @@ from utils.datahelper import *
 from architectures.han import *
 from architectures.cnn import *
 from architectures.transformer import *
+from sklearn.metrics import f1_score
 
 
 class WSTC():
@@ -40,11 +41,14 @@ class WSTC():
             self.classifier = classifier
         if self.is_cuda:
             self.classifier = self.classifier.cuda()
-
+        self.sup_list = {}
         self.n_classes = n_classes
-        self.optimizer = optim.Adam(self.classifier.parameters(), lr=learning_rate)
+        # self.optimizer = optim.Adam(self.classifier.parameters(), lr=learning_rate)
         # self.optimizer  = torch.optim.SGD(filter(lambda p: p.requires_grad, self.classifier.parameters()), lr=0.01, momentum=0.9)
-        # self.optimizer = optim.SGD(self.classifier.parameters(), lr=0.01, momentum=0.9)
+        if self.model == 'rnn':
+            self.optimizer = optim.Adam(self.classifier.parameters(), lr=learning_rate)
+        else:
+            self.optimizer = optim.SGD(self.classifier.parameters(), lr=learning_rate, momentum=0.9)
         self.criterion = nn.KLDivLoss(reduction='batchmean')
 
     ### Generates predictions and class scores ###
@@ -56,9 +60,13 @@ class WSTC():
             if self.model=='rnn':
                 with torch.no_grad():
                     self.classifier._init_hidden_state(0)
-                    
                 if self.is_cuda:
                     document = document.cuda()
+                pred = self.classifier(document)
+            elif self.model == 'cnn':
+                if self.is_cuda:
+                    document = document.cuda()
+                document = Variable(document)
                 pred = self.classifier(document)
             elif self.model=='bert':
                 input_id, mask = document
@@ -86,12 +94,12 @@ class WSTC():
                     self.classifier._init_hidden_state(0)
                 if self.is_cuda:
                     document = document.cuda()
+                    label = label.cuda()
                 feature = self.classifier(document)
             elif self.model == 'cnn':
                 if self.is_cuda:
                     document = document.cuda()
                     label = label.cuda()
-                    
                 feature = self.classifier(document)
             elif self.model == 'bert':
                 input_id, mask = document
@@ -117,9 +125,15 @@ class WSTC():
                 for index in indices:
                     preds_map[index] = preds_map.get(index, 0) + 1
 
+            preds_list.extend(indices)
+            actual_list.extend(label.tolist())
+
             test_correct += binary_accuracy(feature.cpu().detach(), label.cpu().detach(), method="eval")
 
         print('Test accuracy: {}'.format(test_correct / len(test_loader.dataset)))
+        f1_macro = np.round(f1_score(actual_list, preds_list, average='macro'), 5)
+        f1_micro = np.round(f1_score(actual_list, preds_list, average='micro'), 5)
+        print('f1_macro = {}, f1_micro = {}'.format(f1_macro, f1_micro))
 
         # Write confidence and booleans to file
         if get_stats:
@@ -127,7 +141,7 @@ class WSTC():
             np.save("preds_array.npy", np.asarray(preds_list))
             np.save("actual_array.npy", np.asarray(actual_list))
 
-    def pretrain(self, train_loader, epochs, output_save_path='pretrain_output.txt', model_save_path="model.pt"):
+    def pretrain(self, train_loader, epochs, sup_idx=None, output_save_path='pretrain_output.txt', model_save_path="model.pt"):
         pretrain_output_file = open(output_save_path, 'w')
         output_save_path = "{}_pretrain_output.txt".format(self.model)
         model_save_path = "{}_model.pt".format(self.model)
@@ -135,6 +149,12 @@ class WSTC():
         best_dev_loss = None
         print('\nPretraining...')
         print('\nPretraining...', file=pretrain_output_file)
+
+        # For docs use only
+        if sup_idx is not None:
+            for i, seed_idx in enumerate(sup_idx):
+                for idx in seed_idx:
+                    self.sup_list[idx] = i
         
         for epoch in range(epochs):
             print('------EPOCH: ' + str(epoch) + '-------')
@@ -196,12 +216,16 @@ class WSTC():
                    train_loader,
                    x,
                    y=None,
+                   learning_rate=0.001,
                    maxiter=500,
                    tol=0.1,
                    power=2,
                    update_interval=100,
                    output_save_path='selftrain_output.txt',
                    model_save_path="finetuned_model.pt"):
+
+        # Optimizer
+        self.optimizer = optim.SGD(self.classifier.parameters(), lr=learning_rate, momentum=0.9)
 
         # Get predictions and scores across classes
         q, y_preds = self.predict(train_loader)
@@ -214,7 +238,7 @@ class WSTC():
         selftrain_file = open(output_save_path, 'w')
         t0 = time()
         index = 0
-        x_length = x.shape[0] if self.model in ('rnn', 'cnn') else len(x)
+        x_length = x.shape[0] if self.model in ('rnn', 'cnn') else len(y)
         index_array = np.arange(x_length)
         for ite in tqdm(range(int(maxiter))):
             if ite % update_interval == 0:
@@ -249,7 +273,12 @@ class WSTC():
             idx = index_array[index * self.batch_size:min((index + 1) * self.batch_size, x_length)]
             
             if len(idx):
-                self.train_on_batch(x=x[idx[0]:idx[-1]], y=p[idx[0]:idx[-1]], batch_size=self.batch_size)
+                if self.model == "bert":
+                    temp_x = {"input_ids": x["input_ids"][idx[0]:idx[-1]], "attention_mask": x["attention_mask"][idx[0]:idx[-1]]}
+                    temp_y = p[idx[0]:idx[-1]]
+                    self.train_on_batch(x=temp_x, y=temp_y, batch_size=self.batch_size)
+                else:
+                    self.train_on_batch(x=x[idx[0]:idx[-1]], y=p[idx[0]:idx[-1]], batch_size=self.batch_size)
 
             index = index + 1 if (index + 1) * self.batch_size <= x_length else 0
 
@@ -261,7 +290,7 @@ class WSTC():
         selftrain_file.close()
 
     def train_on_batch(self, x, y, batch_size):
-        batch_data = DataWrapper(x, y)
+        batch_data = DataWrapper(x, y) if self.model in ('rnn', 'cnn') else BertDataWrapper(x, y)
         batch_train_loader = DataLoader(dataset=batch_data,
                                         batch_size=batch_size,
                                         shuffle=False)
@@ -275,14 +304,12 @@ class WSTC():
                     label = label.cuda()
                 document = Variable(document)
                 feature = self.classifier(document)
-                
             elif self.model == 'cnn':
                 if self.is_cuda:
                     document = document.cuda()
                     label = label.cuda()
                 document = Variable(document)
                 feature = self.classifier(document)
-
             elif self.model == 'bert':
                 input_id, mask = document
                 if self.is_cuda:
@@ -311,4 +338,7 @@ class WSTC():
         # square each class, divide by total of class
         weight = q**power / q.sum(axis=0)
         p = (weight.T / weight.sum(axis=1)).T
+        for i in self.sup_list:
+            p[i] = 0
+            p[i][self.sup_list[i]] = 1
         return p

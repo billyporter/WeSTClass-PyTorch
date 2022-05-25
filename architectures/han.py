@@ -55,8 +55,8 @@ class HierAttLayerEncoder(nn.Module):
     def __init__(self, vocab_sz, embedding_dim, embedding_mat):
         super(HierAttLayerEncoder, self).__init__()
 
-        self.emb_layer = nn.Embedding(vocab_sz, embedding_dim)
-        self.emb_layer.weights = torch.nn.Parameter(torch.from_numpy(embedding_mat))
+        weights = torch.from_numpy(embedding_mat).type(torch.FloatTensor)
+        self.emb_layer = nn.Embedding(vocab_sz, embedding_dim).from_pretrained(weights)
         self.l_lstm = nn.GRU(input_size=100,
                              hidden_size=100,
                              num_layers=2,

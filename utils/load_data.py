@@ -13,6 +13,7 @@ from collections import Counter
 from os.path import join
 from nltk import tokenize
 from gensim.models import word2vec
+import random
 
 def read_file(data_dir, with_evaluation):
     data = []
@@ -306,7 +307,7 @@ def load_cnn(dataset_name, sup_source, num_keywords=10, with_evaluation=True, tr
     sequences_padded = pad_sequences(data)
     word_counts, vocabulary, vocabulary_inv = build_vocab(sequences_padded)
     x = build_input_data_cnn(sequences_padded, vocabulary)
-    x = x[perm]
+    # x = x[perm]
 
     if with_evaluation:
         print("Number of classes: {}".format(len(np.unique(y))))

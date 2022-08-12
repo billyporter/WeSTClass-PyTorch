@@ -11,6 +11,7 @@ from architectures.transformer import *
 from utils.load_data import load_dataset, train_word2vec
 from utils.gen import *
 from utils.bert_utils import *
+import random
 
 def main():
     ### Arg Parser Settings ###
@@ -25,9 +26,11 @@ def main():
     parser.add_argument('--with_statistics', default='False', action="store_true")
     parser.add_argument('--load_model', default='False', action="store_true")
     parser.add_argument('--save_docs', default='False', action="store_true")
+    parser.add_argument('--embeddings', default='aware', choices=['aware', 'agnostic'])
     parser.add_argument('--silence_warnings', default='False', action="store_true")
 
     args = parser.parse_args()
+    print(args)
 
     ### Hyperparamter Settings ###
     if args.model == 'rnn':
@@ -35,9 +38,9 @@ def main():
         sent_len = 45
         sequence_length = [doc_len, sent_len]
         batch_size = 256
-        pretrain_epochs = 25
+        pretrain_epochs = 20
         lr = 0.001
-        self_lr = 0.001
+        self_lr = 0.0001
         update_interval = 50
         maxiter = 5000
     elif args.model == 'cnn':
@@ -49,11 +52,12 @@ def main():
         update_interval = 50
         maxiter = 5000
     elif args.model == 'bert':
-        batch_size = 3
+        batch_size = 16
         pretrain_epochs = 8
-        lr = 0.00001
-        update_interval = 250
-        maxiter = 1000
+        lr = 0.00005
+        self_lr = 0.00001
+        update_interval = 500
+        maxiter = 3000
     sup_idx = None
 
     ### Data Section ###
@@ -94,10 +98,11 @@ def main():
             print("Saving docs...")
             np.save("data/seed_docs_{}.npy".format(args.model), seed_docs)
             np.save("data/seed_label_{}.npy".format(args.model), seed_label)
-            # np.save('data/real_docs_{}.npy'.format(args.model), x)
-            # np.save('data/real_label_{}.npy'.format(args.model), y)
-            if args.model in ("rnn", "cnn"):
-                np.save('data/embedding_matrix.npy', embedding_mat)
+            # print().shape
+            np.save('data/real_docs_{}1.npy'.format(args.model), x)
+            np.save('data/real_label_{}1.npy'.format(args.model), y)
+            # if args.model in ("rnn", "cnn"):
+            #     np.save('data/embedding_matrix.npy', embedding_mat)
 
     elif args.data == "load":
         if args.pretrain == True:
@@ -107,14 +112,29 @@ def main():
                 seed_docs = torch.from_numpy(seed_docs_numpy)
                 embedding_mat = np.load('data/embedding_matrix.npy')
             elif args.model == "bert":
-                seed_docs = np.load('data/seed_docs_{}.npy'.format(args.model), allow_pickle=True).item()
-                seed_label = np.load('data/seed_label_{}.npy'.format(args.model))
+                # seed_docs = np.load('data/seed_docs_{}.npy'.format(args.model), allow_pickle=True).item()
+                # print(seed_docs)
+                # print().shape
+                # seed_label = np.load('data/seed_label_{}.npy'.format(args.model))
+                #### delete ####
+                seed_docs_numpy = np.load('data/seed_docs_{}.npy'.format("cnn"))
+                seed_docs = torch.from_numpy(seed_docs_numpy)
+                seed_label = np.load('data/seed_label_{}.npy'.format("cnn"))
+                vocabulary_inv_list = np.load('vocabulary_inv_list.npy')
+                seed_docs = tokenizeText(seed_docs_numpy, vocabulary_inv_list)
+                #### delete ####
         if args.selftrain == True or args.evaluate == True:
             if args.model in ("rnn", "cnn"):
                 x = np.load('data/real_docs_{}.npy'.format(args.model))
                 y = np.load('data/real_label_{}.npy'.format(args.model))
                 embedding_mat = np.load('data/embedding_matrix.npy')
             elif args.model == "bert":
+                #### delete ####
+                # x = np.load('data/real_docs_{}.npy'.format("cnn"))
+                # y = np.load('data/real_label_{}.npy'.format("cnn"))
+                # vocabulary_inv_list = np.load('vocabulary_inv_list.npy')
+                # x = tokenizeText(x, vocabulary_inv_list)
+                #### delete ####
                 x = np.load('data/real_docs_{}.npy'.format(args.model), allow_pickle=True).item()
                 y = np.load('data/real_label_{}.npy'.format(args.model))
 
@@ -124,7 +144,8 @@ def main():
                 batch_size=batch_size,
                 embedding_matrix=embedding_mat,
                 learning_rate=lr,
-                classifier=classifier)
+                classifier=classifier,
+                sup_source=args.sup_source)
 
     if args.pretrain == True:
         seed_label = torch.from_numpy(seed_label)

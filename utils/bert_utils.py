@@ -156,12 +156,12 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
     data_full = preprocess_doc(data)
 
     # Get subset of data for embeddings
-    data, y = reduce_data(data_full, y_full, 10000, 4)
-    print(len(data))
+    data, y = reduce_data(data_full, y_full, 7500, 4)
 
     # Get data statistics
-    real_len, pseudo_len, embedding_len = get_statistics(data)
-    print(real_len, pseudo_len)
+    real_len, pseudo_len, embedding_len = get_statistics(data_full)
+    print(real_len, pseudo_len, embedding_len)
+    # print().shape
 
     # Add keywords to end sentence
     if sup_source in ("labels", "keywords"):
@@ -179,9 +179,13 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
     # Tokenize data
     print("Converting text to tokens...")
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-    encoded_data = tokenizer(data, padding='max_length', max_length=embedding_len, truncation=True,)
+    encoded_data = tokenizer(data, padding='max_length', max_length=real_len, truncation=True,)
     # encoded_data_full = tokenizer(data_full, padding='max_length', max_length=real_len, truncation=True,)
-    encoded_keywords = tokenizer(keywords_sents, padding='max_length', max_length=embedding_len, truncation=True)
+    # encoded_data_full = {"input_ids": np.asarray(encoded_data_full["input_ids"]),
+    #  "attention_mask": np.asarray(encoded_data_full["attention_mask"])}
+    # np.save("data/real_docs_bert", encoded_data_full)
+    # np.save("data/real_label_bert", y_full)
+    encoded_keywords = tokenizer(keywords_sents, padding='max_length', max_length=real_len, truncation=True)
     print('Done tokenizing...')
 
     # Load pre-trained model (weights)
@@ -281,23 +285,15 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
     if gen_seed_docs == "generate":
         # Create embedding matrix
 
+        # print("embed mat len: ", len(embedding_mat))
         # embedding_mat, encode_list = reduce_embeddings(embed_encode_dict, encode_count_dict, 50000)
         embedding_mat = np.array(sorted(list(embed_encode_dict.keys())))
         encode_list = np.array(list(embed_encode_dict.values()))
-        # print("embed mat len: ", len(embedding_mat))
-        # print("embed mat size: ", sys.getsizeof(embedding_mat))
-        # np.save("t_embed_mat.npy", embedding_mat)
-        # np.save("t_encode_count_dict.npy", encode_count_dict)
-        # np.save("t_embed_encode_dict.npy", embed_encode_dict)
-        # np.save("t_keyword_encodes.npy", keyword_encodes)
-        # np.save("t_keyword_embeds.npy", keyword_embeds)
-        # np.save("t_encode_list.npy", encode_list)
-        # print().shape
+        print("embed mat len: ", len(embedding_mat))
+        print("embed mat size: ", sys.getsizeof(embedding_mat))
 
         # Get VMF Distribution
         _, centers, kappas = label_expansion_bert(embedding_mat, embed_encode_dict, keyword_embeds, keyword_encodes, tokenizer)
-        np.save("t_centers.npy", centers)
-        np.save("t_kappas.npy", kappas)
 
         # Generate Pseudo Documents
         print("Pseudo documents generation...")
@@ -318,26 +314,40 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
     # encoded_data_full = {"input_ids": np.asarray(encoded_data_full["input_ids"]),
     #  "attention_mask": np.asarray(encoded_data_full["attention_mask"])}
     # return encoded_data_full, y_full, seed_docs, seed_labels
-    return encoded_data, y_full, seed_docs, seed_labels
+    return encoded_data, y, seed_docs, seed_labels
 
 def tokenizeText(encoded_docs, vocabulary_inv_list):
 
     vocabulary_inv = {key: value for key, value in enumerate(vocabulary_inv_list)}
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
 
+    print(encoded_docs[0])
+    print(encoded_docs[1])
     # Convert to text, drop pads
     docs_text = []
     print("Converting encoding to text...")
     for doc in tqdm(encoded_docs):
         temp_doc = []
-        for sent in doc:
-            for encoded_word in sent:
-                if encoded_word == 0:
-                    continue
-                temp_doc.append(vocabulary_inv[encoded_word])
+        for encoded_word in doc:
+            if encoded_word == 0:
+                continue
+            temp_doc.append(vocabulary_inv[encoded_word])
         docs_text.append(" ".join(temp_doc))
-    # print(docs_text)
+
+    # for doc in tqdm(encoded_docs):
+    #     temp_doc = []
+    #     for sent in doc:
+    #         for encoded_word in sent:
+    #             if encoded_word == 0:
+    #                 continue
+    #             temp_doc.append(vocabulary_inv[encoded_word])
+    #     docs_text.append(" ".join(temp_doc))
     print("Converting text to tokens...")
-    texts = [tokenizer(text,padding='max_length', max_length = 450, 
-                       truncation=True, return_tensors="pt") for text in tqdm(docs_text)]
+    # texts = [tokenizer(text,padding='max_length', max_length = 450, 
+    # #                    truncation=True, return_tensors="pt") for text in tqdm(docs_text)]
+    # texts = tokenizer(docs_text, padding='max_length', max_length=450, truncation=True,)
+    texts = tokenizer(docs_text, padding='max_length', max_length=100, truncation=True,)
+    texts = {"input_ids": np.asarray(texts["input_ids"]), "attention_mask": np.asarray(texts["attention_mask"])}
+    # print(texts)
+    # print().shape
     return texts

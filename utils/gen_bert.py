@@ -1,11 +1,12 @@
 import numpy as np
 import torch
 import torch.nn as nn
-def warn(*args, **kwargs):
-    pass
 import warnings
-warnings.filterwarnings("ignore", category=DeprecationWarning)
-warnings.warn = warn
+import os
+import sys
+if not sys.warnoptions:
+    warnings.simplefilter("ignore")
+    os.environ["PYTHONWARNINGS"] = "ignore" # Also affect subprocesses
 import spherecluster
 from spherecluster import SphericalKMeans, VonMisesFisherMixture, sample_vMF
 
@@ -81,34 +82,28 @@ def label_expansion_bert(embedding_mat, embed_encode_dict, keyword_embeds, keywo
     while len(all_class_labels) == len(set(all_class_labels)):
         sz += 1
         expanded_array, exp_debug, debug2 = seed_expansion_bert(sz, embedding_mat, avg_embeddings, embed_encode_dict, keyword_embeds, keyword_encodes)
-        # all_class_labels = [w for w_class in exp_debug for w in w_class]
-        # print(all_class_labels)
         all_class_labels = [w for w_class in debug2 for w in w_class]
         all_class_debugs = [w for w_class in exp_debug for w in w_class]
-        print(len(all_class_labels), len(set(all_class_labels)))
-        print(len(all_class_debugs), len(set(all_class_debugs)))
-        print(all_class_debugs)
-        # print(all_class_labels)
     # expanded_array, exp_debug = seed_expansion_bert(sz - 1, embedding_mat, avg_embeddings, embed_encode_dict, keyword_embeds, keyword_encodes)
-    label_dict = {}
-    for i, label in enumerate(all_class_labels):
-        if label in label_dict:
-            print('-----DUPE------')
-            print(i)
-            print(label_dict[label])
-            print(tokenizer.decode(all_class_debugs[i]))
-            print(tokenizer.decode(all_class_debugs[label_dict[label]]))
-        label_dict[label] = i
-    print("Final expansion size t = {}".format(len(expanded_array[0])))
+    # label_dict = {}
+    # for i, label in enumerate(all_class_labels):
+    #     if label in label_dict:
+    #         print('-----DUPE------')
+    #         print(i)
+    #         print(label_dict[label])
+    #         print(tokenizer.decode(all_class_debugs[i]))
+    #         print(tokenizer.decode(all_class_debugs[label_dict[label]]))
+    #     label_dict[label] = i
+    # print("Final expansion size t = {}".format(len(expanded_array[0])))
 
     # Decode class labels (Delete Later)
-    print("Size: ", sz - 1)
-    for class_label in exp_debug:
-        for word in class_label:
-            print("word: ", tokenizer.decode(word))
-        decoded_text = tokenizer.decode(class_label)
-        print(decoded_text)
-        print()
+    # print("Size: ", sz - 1)
+    # for class_label in exp_debug:
+    #     for word in class_label:
+    #         print("word: ", tokenizer.decode(word))
+    #     decoded_text = tokenizer.decode(class_label)
+    #     print(decoded_text)
+    #     print()
 
     centers = []
     kappas = []

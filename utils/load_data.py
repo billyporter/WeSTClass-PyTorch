@@ -14,6 +14,23 @@ from os.path import join
 from nltk import tokenize
 from gensim.models import word2vec
 
+REDUCEDATA = True
+
+def reduce_data(x, y, num_examples):
+    num_classes = 4
+    class_perms_list = []
+    old_class_sz = len(x) // num_classes
+    for i in range(1, num_classes + 1):
+        indices = np.arange((i - 1) * old_class_sz, i * old_class_sz)
+        perm = np.random.permutation(indices)
+        class_perms_list.extend(perm[:num_examples])
+    p = np.asarray(class_perms_list)
+    x = np.asarray(x)[p]
+    y = np.asarray(y)[p]
+    
+    return list(x), y
+
+
 def read_file(data_dir, with_evaluation):
     data = []
     target = []
@@ -31,6 +48,9 @@ def read_file(data_dir, with_evaluation):
         assert set(range(len(np.unique(y)))) == set(np.unique(y))
     else:
         y = None
+        
+    if REDUCEDATA:
+        data, y =  reduce_data(data, y, 1000)
     return data, y
 
 
@@ -339,6 +359,7 @@ def load_dataset(model, sup_source="keywords", with_evaluation=True, truncate_le
         return load_rnn("agnews", sup_source, with_evaluation=with_evaluation, truncate_len=truncate_len)
 
 
+# Temp setting to true
 def train_word2vec(sentence_matrix, vocabulary_inv, dataset_name, mode='skipgram',
                    num_features=100, min_word_count=5, context=5):
     model_dir = 'data/' + dataset_name
@@ -346,7 +367,7 @@ def train_word2vec(sentence_matrix, vocabulary_inv, dataset_name, mode='skipgram
     model_name = os.path.join(model_dir, model_name)
     print(model_name)
     print(os.path.exists(model_name))
-    if os.path.exists(model_name):
+    if not os.path.exists(model_name): # Remvoe not
         embedding_model = word2vec.Word2Vec.load(model_name)
         print("Loading existing Word2Vec model {}...".format(model_name))
     else:
@@ -362,15 +383,15 @@ def train_word2vec(sentence_matrix, vocabulary_inv, dataset_name, mode='skipgram
             sg = 0
             print('Model: CBOW')
         embedding_model = word2vec.Word2Vec(sentences, workers=num_workers, sg=sg,
-                                            size=num_features, min_count=min_word_count,
+                                            vector_size=num_features, min_count=min_word_count,
                                             window=context, sample=downsampling)
 
         embedding_model.init_sims(replace=True)
 
-        if not os.path.exists(model_dir):
-            os.makedirs(model_dir)
-        print("Saving Word2Vec model {}".format(model_name))
-        embedding_model.save(model_name)
+        # if not os.path.exists(model_dir):
+        #     os.makedirs(model_dir)
+        # print("Saving Word2Vec model {}".format(model_name))
+        # embedding_model.save(model_name)
 
     print(embedding_model)
     embedding_weights = {}

@@ -22,9 +22,11 @@ class WSTC():
                  embedding_matrix=None,
                  batch_size=256,
                  learning_rate=0.01,
-                 classifier=None):
+                 classifier=None,
+                 sup_source="keywords"):
 
         self.batch_size = batch_size
+        self.sup_source = sup_source
 
         if model == 'rnn':
             self.classifier = HierAttLayer(vocab_sz, word_embedding_dim,
@@ -45,11 +47,12 @@ class WSTC():
         self.n_classes = n_classes
         # self.optimizer = optim.Adam(self.classifier.parameters(), lr=learning_rate)
         # self.optimizer  = torch.optim.SGD(filter(lambda p: p.requires_grad, self.classifier.parameters()), lr=0.01, momentum=0.9)
-        if self.model == 'rnn':
+        if self.model in ('rnn', 'bert'):
             self.optimizer = optim.Adam(self.classifier.parameters(), lr=learning_rate)
         else:
             self.optimizer = optim.SGD(self.classifier.parameters(), lr=learning_rate, momentum=0.9)
         self.criterion = nn.KLDivLoss(reduction='batchmean')
+        self.lr = learning_rate
 
     ### Generates predictions and class scores ###
     def predict(self, x):
@@ -143,7 +146,8 @@ class WSTC():
 
     def pretrain(self, train_loader, epochs, sup_idx=None, output_save_path='pretrain_output.txt', model_save_path="model.pt"):
         pretrain_output_file = open(output_save_path, 'w')
-        output_save_path = "{}_pretrain_output.txt".format(self.model)
+        print("Epochs: {}, Batch size: {}, LR: {}".format(epochs, self.batch_size, self.lr), file=pretrain_output_file)
+        output_save_path = "{}_{}_pretrain_output.txt".format(self.model, self.sup_source)
         model_save_path = "{}_model.pt".format(self.model)
         t0 = time()
         best_dev_loss = None
@@ -204,7 +208,7 @@ class WSTC():
 
             if best_dev_loss is None or train_loss < best_dev_loss:
                 print('Saving...')
-                torch.save(self.classifier, model_save_path)
+                # torch.save(self.classifier, model_save_path)
                 best_dev_loss = train_loss
 
         # Close output file
@@ -225,7 +229,10 @@ class WSTC():
                    model_save_path="finetuned_model.pt"):
 
         # Optimizer
-        self.optimizer = optim.SGD(self.classifier.parameters(), lr=learning_rate, momentum=0.9)
+        if self.model == 'bert' or self.model == 'rnn':
+            self.optimizer = optim.Adam(self.classifier.parameters(), lr=learning_rate)
+        else:
+            self.optimizer = optim.SGD(self.classifier.parameters(), lr=learning_rate, momentum=0.9)
 
         # Get predictions and scores across classes
         q, y_preds = self.predict(train_loader)
@@ -233,9 +240,10 @@ class WSTC():
         y_preds_last = np.copy(y_preds)
 
         # Pre loop variables
-        output_save_path = "{}_selftrain_output.txt".format(self.model)
+        output_save_path = "{}_{}_selftrain_output.txt".format(self.model, self.sup_source)
         model_save_path = "{}_model.pt".format(self.model)
         selftrain_file = open(output_save_path, 'w')
+        print("LR: {}, MaxIter: {}, tol: {}, update: {}, batch: {}".format(learning_rate, maxiter, tol, update_interval, self.batch_size), file=selftrain_file)
         t0 = time()
         index = 0
         x_length = x.shape[0] if self.model in ('rnn', 'cnn') else len(y)
@@ -266,7 +274,7 @@ class WSTC():
                     print('Reached tolerance threshold. Stopping training.')
                     print('Reached tolerance threshold. Stopping training.', file=selftrain_file)
                     print('Saving...')
-                    torch.save(self.classifier, model_save_path)
+                    # torch.save(self.classifier, model_save_path)
                     break
 
             # Train on a singular batch

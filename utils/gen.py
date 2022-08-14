@@ -12,13 +12,13 @@ np.random.seed(1234)
 # future version of SKLearn. This code
 # block is necessary to keep the output
 # readable
-def warn(*args, **kwargs):
-    pass
+import sys
 import warnings
-warnings.warn = warn
+if not sys.warnoptions:
+    warnings.simplefilter("ignore")
+    os.environ["PYTHONWARNINGS"] = "ignore" # Also affect subprocesses
 import spherecluster
 from spherecluster import SphericalKMeans, VonMisesFisherMixture, sample_vMF
-
 
 def seed_expansion(word_sup_array, prob_sup_array, sz, write_path, vocabulary_inv, embedding_mat):
     expanded_seed = []
@@ -96,6 +96,7 @@ def label_expansion(class_labels, write_path, vocabulary_inv, embedding_mat):
                 f.write(vocabulary_inv[word] + ' ')
             f.close()
     print("Finished vMF distribution fitting.")
+    print().shape
     return expanded_array, centers, kappas
 
 

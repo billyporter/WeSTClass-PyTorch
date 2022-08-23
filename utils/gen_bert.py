@@ -52,9 +52,9 @@ def psuedodocs_bert(embedding_mat, encode_count_dict, keyword_encodes, encode_li
             prob_vec /= np.sum(prob_vec)
             prob_vec *= 1 - interp_weight
             prob_vec += background_vec
-            prob_indices = np.random.choice(len(prob_vec), size=doc_len, p=prob_vec)
+            prob_indices = np.random.choice(len(prob_vec), size=sequence_length, p=prob_vec)
             encoded_prob = [encode_list[i] for i in prob_indices]
-            docs[i*num_doc_per_class+j] = encoded_prob 
+            docs[i*num_doc_per_class+j][:sequence_length] = encoded_prob 
             labels[i*num_doc_per_class+j] = interp_weight/num_class*np.ones(num_class)
             labels[i*num_doc_per_class+j][i] += 1 - interp_weight
             # TODO: Add period, maybe separate into sentences?
@@ -85,25 +85,6 @@ def label_expansion_bert(embedding_mat, embed_encode_dict, keyword_embeds, keywo
         all_class_labels = [w for w_class in debug2 for w in w_class]
         all_class_debugs = [w for w_class in exp_debug for w in w_class]
     # expanded_array, exp_debug = seed_expansion_bert(sz - 1, embedding_mat, avg_embeddings, embed_encode_dict, keyword_embeds, keyword_encodes)
-    # label_dict = {}
-    # for i, label in enumerate(all_class_labels):
-    #     if label in label_dict:
-    #         print('-----DUPE------')
-    #         print(i)
-    #         print(label_dict[label])
-    #         print(tokenizer.decode(all_class_debugs[i]))
-    #         print(tokenizer.decode(all_class_debugs[label_dict[label]]))
-    #     label_dict[label] = i
-    # print("Final expansion size t = {}".format(len(expanded_array[0])))
-
-    # Decode class labels (Delete Later)
-    # print("Size: ", sz - 1)
-    # for class_label in exp_debug:
-    #     for word in class_label:
-    #         print("word: ", tokenizer.decode(word))
-    #     decoded_text = tokenizer.decode(class_label)
-    #     print(decoded_text)
-    #     print()
 
     centers = []
     kappas = []

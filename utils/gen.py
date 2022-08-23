@@ -96,7 +96,6 @@ def label_expansion(class_labels, write_path, vocabulary_inv, embedding_mat):
                 f.write(vocabulary_inv[word] + ' ')
             f.close()
     print("Finished vMF distribution fitting.")
-    print().shape
     return expanded_array, centers, kappas
 
 

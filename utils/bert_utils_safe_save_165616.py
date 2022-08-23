@@ -124,9 +124,6 @@ def extract_keywords(data_path, num_keywords, data, perm):
     return keywords, new_sup_idx
 
 def reduce_data(x, y, num_examples, num_classes):
-    # Sort data by y
-    x = [x for _, x in sorted(zip(y, x))]
-    y = sorted(y)
     print(len(x))
     class_perms_list = []
     old_class_sz = len(x) // num_classes
@@ -162,7 +159,6 @@ def get_keyword_emebds(keywords, encode_count_dict, encode_embed_dict):
     pass
 
 def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation=True, gen_seed_docs="generate", batch_size=16, model_type="bert"):
-    np.random.seed(1234)
     data_path = 'data/' + dataset_name
     data, y_full = read_file(data_path, with_evaluation)
 
@@ -170,8 +166,7 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
     data_full = preprocess_doc(data)
 
     # Get subset of data for embeddings
-    data, y = reduce_data(data_full, y_full, 3000, 4)
-    # data = data_full
+    data, y = reduce_data(data_full, y_full, 2500, 4)
     print(len(data))
 
     # Get data statistics
@@ -183,6 +178,7 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
         keywords = load_keywords(data_path, sup_source)
     elif sup_source == "docs":
         sz = len(data)
+        np.random.seed(1234)
         perm = np.random.permutation(sz)
         data_copy = [s.split(" ") for s in data]
         keywords, sup_idx = extract_keywords(data_path, 10, data_copy, perm)
@@ -193,7 +189,7 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
     # Tokenize data
     print("Converting text to tokens...")
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-    encoded_data = tokenizer(data, padding='max_length', max_length=72, truncation=True,)
+    encoded_data = tokenizer(data, padding='max_length', max_length=real_len, truncation=True,)
     # encoded_data_full = tokenizer(data_full, padding='max_length', max_length=real_len, truncation=True,)
     encoded_keywords = tokenizer(keywords_sents, padding='max_length', max_length=real_len, truncation=True)
     print('Done tokenizing...')
@@ -216,8 +212,6 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
 
     # Construct embedding: id dictionary
     embed_encode_dict = {}
-    encode_embed_dict = {} # new
-    embed_vocab = {} # new
     encode_count_dict = {}
     keyword_embeds = []
     keyword_encodes = []
@@ -244,7 +238,6 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
             keyword_class_dict[encoding] = i
             temp_encodes.append(encoding)
         keyword_encodes.append(temp_encodes)
-    print(keyword_embeds)
 
     print("Beginning Embedding Generation...")
     # Embedding loop
@@ -288,10 +281,6 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
                     # NEW #
                     if encoding in all_keyword_encodes:
                         all_keyword_encodes[encoding].append(embedding)
-
-                    if encoding not in encode_embed_dict:
-                         encode_embed_dict[encoding] = []
-                    encode_embed_dict[encoding].append(embedding)
                     # NEW #
         
     print("Finished Embedding Generation...")
@@ -300,6 +289,7 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
     print("encode dict size: ", sys.getsizeof(encode_count_dict))
 
     # NEW #
+
     for encoding, embed_candidates in all_keyword_encodes.items():
         # Get class index
         class_index = keyword_class_dict[encoding]
@@ -314,16 +304,7 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
 
             # Add to embeds
             keyword_embeds[class_index].append(tuple(combined_embedding.tolist()))
-
-    # # Reduce to one embedding
-    for encoding, embed_candidates in encode_embed_dict.items():
-        word_embeddings = torch.zeros((len(embed_candidates), 768))
-        for j, embed in enumerate(embed_candidates):
-            word_embeddings[j] = torch.FloatTensor(embed)
-        combined_embedding = torch.mean(word_embeddings, 0)
-        embed_vocab[encoding] = combined_embedding
-
-    createBertEmbeddignMat(embed_vocab, encode_count_dict)
+    
     # NEW #
 
     seed_docs_input_ids = []
@@ -368,11 +349,6 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
     # if model_type=="cnn":
     #     print('here')
     #     return seed_docs["input_ids"], seed_labels, tokenizer
-    np.save("data/seed_docs_bert_5000", seed_docs["input_ids"])
-    np.save("data/seed_labels_bert_5000", seed_labels)
-    np.save("data/real_docs_bert_5000", encoded_data["input_ids"])
-    np.save("data/real_labels_bert_5000", y)
-    print().shape
     return encoded_data, y_full, seed_docs, seed_labels
 
 def tokenizeText(encoded_docs, vocabulary_inv_list):
@@ -380,6 +356,9 @@ def tokenizeText(encoded_docs, vocabulary_inv_list):
     vocabulary_inv = {key: value for key, value in enumerate(vocabulary_inv_list)}
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
     
+    # print(encoded_docs[0])
+    # print(encoded_docs[1])
+
     # Convert to text, drop pads
     docs_text = []
     print("Converting encoding to text...")
@@ -401,15 +380,13 @@ def tokenizeText(encoded_docs, vocabulary_inv_list):
 def build_vocab(docs):
     # Build vocabulary
     word_counts = Counter(itertools.chain(*docs))
-    # Make pad top
-    word_counts.update({0: float('inf')})
     # Mapping from index to word
     vocabulary_inv = [x[0] for x in word_counts.most_common()]
     # Mapping from word to index
     vocabulary = {x: i for i, x in enumerate(vocabulary_inv)}
     return word_counts, vocabulary, vocabulary_inv
 
-def train_embed(sentence_matrix, vocab_inv, num_features=100, min_word_count=3, context=5):
+def train_embed(sentence_matrix, vocab_inv, num_features=100, min_word_count=5, context=5):
     num_workers = 15  # Number of threads to run in parallel
     downsampling = 1e-3  # Downsample setting for frequent words
     print('Training Word2Vec model...')
@@ -434,126 +411,46 @@ def train_embed(sentence_matrix, vocab_inv, num_features=100, min_word_count=3, 
     return embedding_weights
 
 
-def trainW2V_BERT_Tokenizer(dataset_name="agnews", train_embeddings=True):
+def bertEmbeddingMat(dataset_name="agnews", train_embeddings=False):
+    data_path = 'data/' + dataset_name
+    data, y_full = read_file(data_path, True)
+
+    # # Clean data
+    # data = preprocess_doc(data)
+
+
+    # Get subset of data for embeddings
+    # data, y = reduce_data(data, y_full, 500, 4)
+    print(len(data))
+
+    # Get data statistics
+    real_len, pseudo_len, embedding_len = get_statistics(data)
+    print(real_len, pseudo_len)
+
+    # Tokenize data
+    print("Converting text to tokens...")
+    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+    encoded_data = tokenizer(data, padding='max_length', max_length=real_len, truncation=True,)
+    print("Done tokeniziging...")
+    print(encoded_data.keys())
+
+    # Build encoding dict
+    word_counts, vocab, vocab_inv_list = build_vocab(encoded_data["input_ids"])
+    vocab_inv = {key: value for key, value in enumerate(vocab_inv_list)}
+
+    # Encode data:
+    data = np.array([[vocab[word] for word in doc] for doc in encoded_data["input_ids"]])
+    print(data.shape)
+
     if train_embeddings:
-        data_path = 'data/' + dataset_name
-        data, y_full = read_file(data_path, True)
-
-        # Clean data
-        data = preprocess_doc(data)
-
-        # Get subset of data for embeddings
-        # data, y = reduce_data(data, y_full, 500, 4)
-        # print(len(data))
-
-        # Get data statistics
-        real_len, pseudo_len, embedding_len = get_statistics(data)
-        print(real_len, pseudo_len)
-
-        # Tokenize data
-        print("Converting text to tokens...")
-        tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-        encoded_data = tokenizer(data, padding='max_length', max_length=72, truncation=True,)
-        print("Done tokenizing...")
-
-        # Build encoding dict
-        word_counts, vocab, vocab_inv_list = build_vocab(encoded_data["input_ids"])
-        vocab_inv = {key: value for key, value in enumerate(vocab_inv_list)}
-
-        # Encode data:
-        data = np.array([[vocab[word] for word in doc] for doc in encoded_data["input_ids"]])
-        print(data.shape)
-
         embedding_weights = train_embed(data, vocab_inv)
         embedding_mat = np.array([np.array(embedding_weights[word]) for word in vocab_inv])
-
-        ## Save
-        np.save("data/bert_vocab.npy", vocab)
-        np.save("data/bert_vocab_inv.npy", vocab_inv)
         np.save("data/embedding_mat_bert.npy", embedding_mat)
-        # np.save("data/bert_data.npy", data)
-        print().shape
     else:
-        vocab = np.load("data/bert_vocab.npy", allow_pickle=True).item()
-        vocab_inv = np.load("data/bert_vocab_inv.npy", allow_pickle=True).item()
         embedding_mat = np.load("data/embedding_mat_bert.npy")
 
-    return embedding_mat, vocab, vocab_inv
+    return embedding_mat, data, vocab, vocab_inv
 
 
-def bert_encodings_to_vocab_encodings(docs, vocab):
-    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-    for doc in docs:
-        new_doc = []
-        for word in doc:
-            new_doc.append(tokenizer.decode([word]))
-        print(new_doc)
-    print().shape
-    print().shape
+def bert_to_word2vec(docs, vocab):
     return np.array([[vocab[word] for word in doc] for doc in docs])
-
-# Creates Embedding Matrix From BERT Embeddings
-def createBertEmbeddignMat(embed_vocab, encode_count_dict):
-    # Add CLS, PAD, SEP
-    other_tokens = [0, 101, 102]
-    for token in other_tokens:
-        encode_count_dict[token] = 1
-        if token == 0:
-            encode_count_dict[token] = float('inf') # So pad is 0... necessary
-        embedding = np.random.uniform(-0.25, 0.25, 768)
-        embedding = tuple(embedding / np.linalg.norm(embedding))
-        embed_vocab[token] = embedding
-
-    vocab_counter = Counter(encode_count_dict)
-    vocabulary_inv = [x[0] for x in vocab_counter.most_common()]
-    vocab_inv = {key: value for key, value in enumerate(vocabulary_inv)}
-
-    # Mapping from word to index
-    vocabulary = {x: i for i, x in enumerate(vocabulary_inv)}
-
-    # Create embedding mat
-    embedding_mat = np.zeros((len(vocabulary) + 3, 768))
-
-    # Initialize embedding
-    for word, index in vocabulary.items():
-        embedding = embed_vocab[word]
-        embedding_mat[index] = embedding
-
-    np.save("data/bert_vocab_2.npy", vocabulary)
-    np.save("data/bert_vocab_inv_2.npy", vocab_inv)
-    np.save("data/embedding_mat_bert_2.npy", embedding_mat)
-    print().shape
-
-    return embedding_mat
-
-def createBERTEmbeddingVocab():
-    vocab = np.load("data/bert_vocab_2.npy", allow_pickle=True).item()
-    vocab_inv = np.load("data/bert_vocab_inv_2.npy", allow_pickle=True).item()
-    embedding_mat = np.load("data/embedding_mat_bert_2.npy")
-    return embedding_mat, vocab, vocab_inv
-
-
-# Get text so can convert to old vocabulary
-def tokensToText(documents, labels, vocab_inv, old_vocab_inv):
-    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-    new_docs = []
-    for document, label in zip(documents, labels):
-        # print(document)
-        new_doc = []
-        for word in document:
-            if word in vocab_inv:
-                # print(word, print())
-                new_doc.append(tokenizer.decode([vocab_inv[word]]))
-            else:
-                new_doc.append(tokenizer.decode([word]))
-        new_docs.append(new_doc)
-    encoded_docs = []
-    for document, label in tqdm(zip(documents, labels)):
-        doc = []
-        for word in document:
-            if word in old_vocab_inv:
-                doc.append(old_vocab_inv[word])
-            else:
-                doc.append(old_vocab_inv["a"])
-        encoded_docs.append(doc)
-    return encoded_docs

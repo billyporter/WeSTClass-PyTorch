@@ -49,8 +49,8 @@ def read_file(data_dir, with_evaluation):
     else:
         y = None
         
-    if REDUCEDATA:
-        data, y =  reduce_data(data, y, 1000)
+    # if REDUCEDATA:
+    #     data, y =  reduce_data(data, y, 200)
     return data, y
 
 
@@ -367,7 +367,7 @@ def train_word2vec(sentence_matrix, vocabulary_inv, dataset_name, mode='skipgram
     model_name = os.path.join(model_dir, model_name)
     print(model_name)
     print(os.path.exists(model_name))
-    if not os.path.exists(model_name): # Remvoe not
+    if os.path.exists(model_name): # Remvoe not
         embedding_model = word2vec.Word2Vec.load(model_name)
         print("Loading existing Word2Vec model {}...".format(model_name))
     else:
@@ -393,7 +393,6 @@ def train_word2vec(sentence_matrix, vocabulary_inv, dataset_name, mode='skipgram
         # print("Saving Word2Vec model {}".format(model_name))
         # embedding_model.save(model_name)
 
-    print(embedding_model)
     embedding_weights = {}
     for key, word in vocabulary_inv.items():
         if word in embedding_model.wv.key_to_index:

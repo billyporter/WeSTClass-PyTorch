@@ -17,6 +17,8 @@ from gensim.models import word2vec
 REDUCEDATA = True
 
 def reduce_data(x, y, num_examples):
+    x = [x for _, x in sorted(zip(y, x))]
+    y = sorted(y)
     num_classes = 4
     class_perms_list = []
     old_class_sz = len(x) // num_classes
@@ -49,8 +51,8 @@ def read_file(data_dir, with_evaluation):
     else:
         y = None
         
-    # if REDUCEDATA:
-    #     data, y =  reduce_data(data, y, 200)
+    if REDUCEDATA:
+        data, y =  reduce_data(data, y, 5000)
     return data, y
 
 
@@ -367,9 +369,11 @@ def train_word2vec(sentence_matrix, vocabulary_inv, dataset_name, mode='skipgram
     model_name = os.path.join(model_dir, model_name)
     print(model_name)
     print(os.path.exists(model_name))
-    if os.path.exists(model_name): # Remvoe not
-        embedding_model = word2vec.Word2Vec.load(model_name)
-        print("Loading existing Word2Vec model {}...".format(model_name))
+    if not os.path.exists(model_name): # Remvoe not
+        # embedding_model = word2vec.Word2Vec.load(model_name)
+        # print("Loading existing Word2Vec model {}...".format(model_name))
+        embedding_model = word2vec.Word2Vec.load("embedding_ltd")
+        # print("Loading existing Word2Vec model {}...".format("embedding_ltd"))
     else:
         num_workers = 15  # Number of threads to run in parallel
         downsampling = 1e-3  # Downsample setting for frequent words
@@ -391,7 +395,8 @@ def train_word2vec(sentence_matrix, vocabulary_inv, dataset_name, mode='skipgram
         # if not os.path.exists(model_dir):
         #     os.makedirs(model_dir)
         # print("Saving Word2Vec model {}".format(model_name))
-        # embedding_model.save(model_name)
+        # embedding_model.save("embedding_ltd")
+        # print().shape
 
     embedding_weights = {}
     for key, word in vocabulary_inv.items():

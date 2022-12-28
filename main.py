@@ -1,4 +1,4 @@
-from os import truncate
+from os import lseek, truncate
 from model import WSTC
 import numpy as np
 import torch
@@ -11,6 +11,7 @@ from architectures.transformer import *
 from utils.load_data import load_dataset, train_word2vec
 from utils.gen import *
 from utils.bert_utils import *
+from architectures.bag_of_words import bag_of_words
 
 
 def main():
@@ -55,7 +56,7 @@ def main():
         batch_size = 16
         pretrain_epochs = 3
         lr = 0.00005
-        self_lr = 0.00003
+        self_lr = 0.00001
         update_interval = 500
         maxiter = 3000
     sup_idx = None
@@ -65,7 +66,8 @@ def main():
     if args.data == "generate":
         if args.model in ("rnn", "cnn"):
 
-            if args.aware:
+            if args.aware == True:
+                print('here')
                 # seed_docs, seed_label = \
                 #     load_data_bert(sup_source=args.sup_source, with_evaluation=args.with_statistics, gen_seed_docs=args.data, model_type=args.model)
 
@@ -78,19 +80,35 @@ def main():
                     embedding_mat, vocab, vocab_inv = createBERTEmbeddingVocab()
 
                 # Convert BERT docs to vocab doc
-                # seed_docs_numpy = np.load("data/seed_docs_bert_10000.npy", allow_pickle=True).item()
-                seed_docs_numpy = np.load("data/seed_docs_bert_200.npy", allow_pickle=True).item()["input_ids"]
-                seed_label = np.load("data/seed_label_200.npy")
+                seed_docs_numpy = np.load("data/seed_docs_bert_5000.npy", allow_pickle=True).item()
+                seed_label = np.load("data/seed_labels_bert_5000.npy")
                 seed_docs_numpy = bert_encodings_to_vocab_encodings(seed_docs_numpy, vocab).astype(np.int32)
                 seed_docs = torch.from_numpy(seed_docs_numpy)
+                # print(seed_docs.shape)
+                print(seed_label.shape)
+                # print().shape
 
                 # x = np.load('data/bert_data.npy')
-                print(x)
                 # y = np.load('data/real_label_bert.npy')
+                x = np.load("data/real_docs_bert_5000.npy", allow_pickle=True).item()
+                y = np.load("data/real_labels_bert_5000.npy")
+                x = bert_encodings_to_vocab_encodings(x, vocab).astype(np.int32)
+                # print(y)
+                # bag_of_words(x, y)
+                # print().shape
 
-                x = bert_encodings_to_vocab_encodings(x, vocab)
+
+
+                # x = bert_encodings_to_vocab_encodings(x, vocab)
                 # print(x.shape)
                 # print(y.shape)
+                # if args.model == "bert":
+                #     seed_attention_mask = np.zeros((5000 * 4, 72))
+                #     seed_attention_mask[:, :39] = 1
+                #     seed_docs = {"input_ids": seed_docs, "attention_mask": seed_attention_mask}
+                #     x_attention_mask = np.zeros((5000 * 4, 72))
+                #     x_attention_mask[:, :39] = 1
+                #     x = {"input_ids": x, "attention_mask": x_attention_mask}
                 # print(seed_docs.shape)
                 # print().shape
 
@@ -111,6 +129,10 @@ def main():
 
                 seed_docs, seed_label = generate_pseudocs(args.model, embedding_mat, word_sup_list, vocabulary_inv_list, 
                                                         word_counts, sequence_length, vocabulary, len_avg, len_std)
+
+                # Delete later
+                # decode_docs(seed_docs, vocabulary_inv)
+                # print().shape
             if args.sup_source == 'docs':
                 if args.model == 'cnn':
                     num_real_doc = len(sup_idx.flatten()) * 10
@@ -145,8 +167,8 @@ def main():
                 embedding_mat = np.load('data/embedding_matrix.npy')
                 # print().shape
             elif args.model == "bert":
-                # seed_docs = np.load('data/seed_docs_{}.npy'.format(args.model), allow_pickle=True).item()
-                # seed_label = np.load('data/seed_label_{}.npy'.format(args.model))
+                # seed_docs = np.load('data/seed_docs_{}_5000.npy'.format(args.model), allow_pickle=True).item()
+                # seed_label = np.load('data/seed_labels_{}_5000.npy'.format(args.model))
                 #### delete ####
                 seed_docs_numpy = np.load('data/seed_docs_{}.npy'.format("cnn"))
                 seed_docs = torch.from_numpy(seed_docs_numpy)
@@ -160,8 +182,9 @@ def main():
                 y = np.load('data/real_label_{}.npy'.format(args.model))
                 embedding_mat = np.load('data/embedding_matrix.npy')
             elif args.model == "bert":
-                # x = np.load('data/real_docs_{}.npy'.format(args.model), allow_pickle=True).item()
-                # y = np.load('data/real_label_{}.npy'.format(args.model))
+                # x = np.load('data/real_docs_{}_5000.npy'.format(args.model))
+                # x = np.load('data/real_docs_{}_5000.npy'.format(args.model), allow_pickle=True).item()
+                # y = np.load('data/real_labels_{}_5000.npy'.format(args.model))
                 #### delete ####
                 x = np.load('data/real_docs_{}.npy'.format("cnn"))
                 y = np.load('data/real_label_{}.npy'.format("cnn"))
@@ -190,19 +213,24 @@ def main():
         # x = np.load('data/real_docs_{}.npy'.format(args.model))
         # y = np.load('data/real_label_{}.npy'.format(args.model))
         # Randomize because can't shuffle batches
+
         p = np.random.permutation(len(y))
         if args.model == "bert":
             x = {"input_ids": x["input_ids"][p], "attention_mask": x["attention_mask"][p]}
         else:
             x = x[p]
         y = y[p]
-
         self_train_data = DataWrapper(x, y) if args.model in ('rnn', 'cnn') else BertDataWrapper(x, y)
         self_train_loader = DataLoader(dataset=self_train_data, batch_size=batch_size, shuffle=False)
+        print('here')
         wstc.self_train(self_train_loader, x, y, learning_rate=self_lr, maxiter=maxiter, update_interval=update_interval)
 
 
     if args.evaluate == True:
+        # ###### Delete later
+        # x = seed_docs
+        # y = torch.argmax(seed_label.cpu(), dim=1)
+        ###### Delete later
         test_data = DataWrapper(x, y) if args.model in ('rnn', 'cnn') else BertDataWrapper(x, y)
         test_loader = DataLoader(dataset=test_data, batch_size=batch_size, shuffle=False)
         wstc.evaluate_dataset(test_loader)

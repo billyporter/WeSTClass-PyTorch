@@ -9,6 +9,7 @@ if not sys.warnoptions:
     os.environ["PYTHONWARNINGS"] = "ignore" # Also affect subprocesses
 import spherecluster
 from spherecluster import SphericalKMeans, VonMisesFisherMixture, sample_vMF
+from transformers import BertTokenizer
 
 def psuedodocs_bert(embedding_mat, encode_count_dict, keyword_encodes, encode_list, centers, kappas, doc_settings):
 
@@ -22,7 +23,7 @@ def psuedodocs_bert(embedding_mat, encode_count_dict, keyword_encodes, encode_li
     # Create background of word frequency
     background_array = np.zeros(len(encode_list))
     total_count = 0
-    for i in range(1, len(encode_list)):
+    for i in range(0, len(encode_list)):
         current_encode = encode_list[i]
         current_count = encode_count_dict[current_encode]
         total_count += current_count
@@ -33,31 +34,56 @@ def psuedodocs_bert(embedding_mat, encode_count_dict, keyword_encodes, encode_li
     # Loop over classes
     for i in range(0, len(keyword_encodes)):
         center, kappa = centers[i], kappas[i]
+        # print(center)
+        # print(kappa)
         discourses = sample_vMF(center, kappa, num_doc_per_class)
 
         # Loop over discourses
         for j in range(num_doc_per_class):
             discourse = discourses[j]
+            # tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
 
-            # Get most similar tokens to discourse
-            prob_vec = np.dot(embedding_mat, discourse)
-            prob_vec = np.exp(prob_vec)
-            sorted_idx = np.argsort(prob_vec)[::-1]
+            # Get Similarity
+            vocab_keyword_similarity = np.dot(embedding_mat, discourse)
 
-            # Restrict vocabulary size
-            delete_idx = sorted_idx[total_num:]
-            prob_vec[delete_idx] = 0
+            ### Remove Duplicates ###
+            # First pass to get max of each encoding
+            encoding_max_dict = {}
+            for index, sim in enumerate(vocab_keyword_similarity):
+                encoding = encode_list[index]
+                if encoding not in encoding_max_dict:
+                    encoding_max_dict[encoding] = (index, sim)
+                else:
+                    if sim > encoding_max_dict[encoding][1]:
+                        encoding_max_dict[encoding] = (index, sim)
+
+            # Second pass to zero out the non maxes:
+            for index in range(0, len(vocab_keyword_similarity)):
+                encoding = encode_list[index]
+                if index != encoding_max_dict[encoding][0]:
+                    vocab_keyword_similarity[index] = 0.0
+            ### End Remove Duplicates ###
+            
+            # Sort by similarity
+            similar_indices = sorted(range(len(vocab_keyword_similarity)), key=lambda k: vocab_keyword_similarity[k], reverse=True)[:sequence_length]
+
+            # Restrict vocabulary
+            vocab_keyword_similarity = np.exp(vocab_keyword_similarity)
+            sorted_idx = np.argsort(vocab_keyword_similarity)[::-1]
+            delete_idx = sorted_idx[sequence_length:]
+            vocab_keyword_similarity[delete_idx] = 0
+            vocab_keyword_similarity /= np.sum(vocab_keyword_similarity)
 
             # Adjust vocabulary for word frequency
-            prob_vec /= np.sum(prob_vec)
-            prob_vec *= 1 - interp_weight
-            prob_vec += background_vec
-            prob_indices = np.random.choice(len(prob_vec), size=sequence_length, p=prob_vec)
-            encoded_prob = [encode_list[i] for i in prob_indices]
-            docs[i*num_doc_per_class+j][:sequence_length] = encoded_prob 
+            vocab_keyword_similarity *= 1 - interp_weight
+            vocab_keyword_similarity += background_vec
+
+            similar_indices = np.random.choice(len(vocab_keyword_similarity), size=sequence_length, p=vocab_keyword_similarity, replace=False)
+            similar_encodings = encode_list[similar_indices]
+            # print("Word: ", tokenizer.decode(similar_encodings))
+            docs[i*num_doc_per_class+j][:sequence_length] = similar_encodings 
             labels[i*num_doc_per_class+j] = interp_weight/num_class*np.ones(num_class)
             labels[i*num_doc_per_class+j][i] += 1 - interp_weight
-            # TODO: Add period, maybe separate into sentences?
     return docs, labels
 
 
@@ -95,6 +121,7 @@ def label_expansion_bert(embedding_mat, embed_encode_dict, keyword_embeds, keywo
         vocab_expanded = tokenizer.decode(expanded_encodes)
         print("Class {}:".format(i))
         print(vocab_expanded)
+        # break
         vmf_soft = VonMisesFisherMixture(n_clusters=1, n_jobs=15)
         vmf_soft.fit(expanded_mat)
         center = vmf_soft.cluster_centers_[0]

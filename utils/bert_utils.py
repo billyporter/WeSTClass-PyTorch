@@ -170,7 +170,7 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
     data_full = preprocess_doc(data)
 
     # Get subset of data for embeddings
-    data, y = reduce_data(data_full, y_full, 3000, 4)
+    data, y = reduce_data(data_full, y_full, 5000, 4)
     # data = data_full
     print(len(data))
 
@@ -244,7 +244,6 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
             keyword_class_dict[encoding] = i
             temp_encodes.append(encoding)
         keyword_encodes.append(temp_encodes)
-    print(keyword_embeds)
 
     print("Beginning Embedding Generation...")
     # Embedding loop
@@ -289,22 +288,21 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
                     if encoding in all_keyword_encodes:
                         all_keyword_encodes[encoding].append(embedding)
 
-                    if encoding not in encode_embed_dict:
-                         encode_embed_dict[encoding] = []
-                    encode_embed_dict[encoding].append(embedding)
+                    # if encoding not in encode_embed_dict:
+                    #      encode_embed_dict[encoding] = []
+                    # encode_embed_dict[encoding].append(embedding)
                     # NEW #
         
     print("Finished Embedding Generation...")
-    print("encoded data size: ", sys.getsizeof(encoded_data))
-    print("embed dict size: ", sys.getsizeof(embed_encode_dict))
-    print("encode dict size: ", sys.getsizeof(encode_count_dict))
+    # print("encoded data size: ", sys.getsizeof(encoded_data))
+    # print("embed dict size: ", sys.getsizeof(embed_encode_dict))
+    # print("encode dict size: ", sys.getsizeof(encode_count_dict))
 
     # NEW #
     for encoding, embed_candidates in all_keyword_encodes.items():
         # Get class index
         class_index = keyword_class_dict[encoding]
 
-        # Get highest embed
         # Get average embedding
         if len(embed_candidates):
             word_embeddings = torch.zeros((len(embed_candidates), 768))
@@ -316,14 +314,14 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
             keyword_embeds[class_index].append(tuple(combined_embedding.tolist()))
 
     # # Reduce to one embedding
-    for encoding, embed_candidates in encode_embed_dict.items():
-        word_embeddings = torch.zeros((len(embed_candidates), 768))
-        for j, embed in enumerate(embed_candidates):
-            word_embeddings[j] = torch.FloatTensor(embed)
-        combined_embedding = torch.mean(word_embeddings, 0)
-        embed_vocab[encoding] = combined_embedding
+    # for encoding, embed_candidates in encode_embed_dict.items():
+    #     word_embeddings = torch.zeros((len(embed_candidates), 768))
+    #     for j, embed in enumerate(embed_candidates):
+    #         word_embeddings[j] = torch.FloatTensor(embed)
+    #     combined_embedding = torch.mean(word_embeddings, 0)
+    #     embed_vocab[encoding] = combined_embedding
 
-    createBertEmbeddignMat(embed_vocab, encode_count_dict)
+    # createBertEmbeddignMat(embed_vocab, encode_count_dict)
     # NEW #
 
     seed_docs_input_ids = []
@@ -332,22 +330,23 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
         # Create embedding matrix
 
         # embedding_mat, encode_list = reduce_embeddings(embed_encode_dict, encode_count_dict, 50000)
-        embedding_mat = np.array(sorted(list(embed_encode_dict.keys())))
+        embedding_mat = np.array(list(embed_encode_dict.keys()))
         encode_list = np.array(list(embed_encode_dict.values()))
-        # print("embed mat len: ", len(embedding_mat))
+        print("encode list len: ", len(encode_list))
+        print("embed mat len: ", len(embedding_mat))
         # print("embed mat size: ", sys.getsizeof(embedding_mat))
     
 
         # Get VMF Distribution
         _, centers, kappas = label_expansion_bert(embedding_mat, embed_encode_dict, keyword_embeds, keyword_encodes, tokenizer)
-        print("embed mat len: ", len(embedding_mat))
-        print("embed mat size: ", sys.getsizeof(embedding_mat))
+        # print("embed mat len: ", len(embedding_mat))
+        # print("embed mat size: ", sys.getsizeof(embedding_mat))
 
         # Generate Pseudo Documents
         print("Pseudo documents generation...")
         num_doc_per_class = 500
         vocab_size = 50
-        interp_weight = 0.2
+        interp_weight = 0.0
         sequence_length = pseudo_len
         doc_settings = (num_doc_per_class, vocab_size, interp_weight, real_len, sequence_length)
         seed_docs_input_ids, seed_labels = \
@@ -359,6 +358,7 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
         seed_attention_mask[:, :sequence_length] = 1
 
     seed_docs = {"input_ids": seed_docs_input_ids, "attention_mask": seed_attention_mask}
+    # bert_encodings_to_vocab_encodings(seed_docs["input_ids"], "")
     # encoded_data_full = {"input_ids": np.asarray(encoded_data_full["input_ids"]),
     #  "attention_mask": np.asarray(encoded_data_full["attention_mask"])}
     # return encoded_data_full, y_full, seed_docs, seed_labels
@@ -368,9 +368,12 @@ def load_data_bert(dataset_name="agnews", sup_source="keywords", with_evaluation
     # if model_type=="cnn":
     #     print('here')
     #     return seed_docs["input_ids"], seed_labels, tokenizer
-    np.save("data/seed_docs_bert_5000", seed_docs["input_ids"])
+    encoded_data = {"input_ids": np.asarray(encoded_data["input_ids"]),
+     "attention_mask": np.asarray(encoded_data["attention_mask"])}
+     
+    np.save("data/seed_docs_bert_5000", seed_docs)
     np.save("data/seed_labels_bert_5000", seed_labels)
-    np.save("data/real_docs_bert_5000", encoded_data["input_ids"])
+    np.save("data/real_docs_bert_5000", encoded_data)
     np.save("data/real_labels_bert_5000", y)
     print().shape
     return encoded_data, y_full, seed_docs, seed_labels
@@ -394,7 +397,7 @@ def tokenizeText(encoded_docs, vocabulary_inv_list):
     print("Converting text to tokens...")
     # texts = [tokenizer(text,padding='max_length', max_length = 450, 
     #                    truncation=True, return_tensors="pt") for text in tqdm(docs_text)]
-    texts = tokenizer(docs_text, padding='max_length', max_length=100, truncation=True,)
+    texts = tokenizer(docs_text, padding='max_length', max_length=72, truncation=True,)
     texts = {"input_ids": np.asarray(texts["input_ids"]), "attention_mask": np.asarray(texts["attention_mask"])}
     return texts
 
@@ -434,7 +437,7 @@ def train_embed(sentence_matrix, vocab_inv, num_features=100, min_word_count=3, 
     return embedding_weights
 
 
-def trainW2V_BERT_Tokenizer(dataset_name="agnews", train_embeddings=True):
+def trainW2V_BERT_Tokenizer(dataset_name="agnews", train_embeddings=False):
     if train_embeddings:
         data_path = 'data/' + dataset_name
         data, y_full = read_file(data_path, True)
@@ -461,16 +464,15 @@ def trainW2V_BERT_Tokenizer(dataset_name="agnews", train_embeddings=True):
         vocab_inv = {key: value for key, value in enumerate(vocab_inv_list)}
 
         # Encode data:
-        data = np.array([[vocab[word] for word in doc] for doc in encoded_data["input_ids"]])
         print(data.shape)
 
         embedding_weights = train_embed(data, vocab_inv)
         embedding_mat = np.array([np.array(embedding_weights[word]) for word in vocab_inv])
 
         ## Save
-        np.save("data/bert_vocab.npy", vocab)
-        np.save("data/bert_vocab_inv.npy", vocab_inv)
-        np.save("data/embedding_mat_bert.npy", embedding_mat)
+        # np.save("data/bert_vocab.npy", vocab)
+        # np.save("data/bert_vocab_inv.npy", vocab_inv)
+        # np.save("data/embedding_mat_bert.npy", embedding_mat)
         # np.save("data/bert_data.npy", data)
         print().shape
     else:
@@ -482,15 +484,28 @@ def trainW2V_BERT_Tokenizer(dataset_name="agnews", train_embeddings=True):
 
 
 def bert_encodings_to_vocab_encodings(docs, vocab):
-    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-    for doc in docs:
-        new_doc = []
-        for word in doc:
-            new_doc.append(tokenizer.decode([word]))
-        print(new_doc)
-    print().shape
-    print().shape
-    return np.array([[vocab[word] for word in doc] for doc in docs])
+    docs = docs["input_ids"]
+    # tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+    # i = 0
+    # j = 0
+    # for doc in docs:
+    #     i += 1
+    #     new_doc = []
+    #     for word in doc:
+    #         new_doc.append(tokenizer.decode([word]))
+    #     if j < 10:
+    #         print('-------------')
+    #         print(" ".join(new_doc))
+    #         j += 1
+    #     if i in (500, 1000, 1500):
+    #         print('\n\nNextClass\n\n')
+    #         j = 0
+
+    # print().shape
+    # print().shape
+    # print().shape
+    # return np.array([[vocab[word] for word in doc] for doc in docs])
+    return np.array([[vocab[word] if word in vocab else 0 for word in doc] for doc in docs])
 
 # Creates Embedding Matrix From BERT Embeddings
 def createBertEmbeddignMat(embed_vocab, encode_count_dict):
@@ -519,9 +534,9 @@ def createBertEmbeddignMat(embed_vocab, encode_count_dict):
         embedding = embed_vocab[word]
         embedding_mat[index] = embedding
 
-    np.save("data/bert_vocab_2.npy", vocabulary)
-    np.save("data/bert_vocab_inv_2.npy", vocab_inv)
-    np.save("data/embedding_mat_bert_2.npy", embedding_mat)
+    # np.save("data/bert_vocab_2.npy", vocabulary)
+    # np.save("data/bert_vocab_inv_2.npy", vocab_inv)
+    # np.save("data/embedding_mat_bert_2.npy", embedding_mat)
     print().shape
 
     return embedding_mat
@@ -557,3 +572,13 @@ def tokensToText(documents, labels, vocab_inv, old_vocab_inv):
                 doc.append(old_vocab_inv["a"])
         encoded_docs.append(doc)
     return encoded_docs
+
+def decode_docs(seed_docs, vocab_inv):
+    for document in seed_docs:
+        # print(document)
+        print('-------------')
+        new_doc = []
+        for word in document:
+            if word in vocab_inv:
+                new_doc.append(vocab_inv[word])
+        print(" ".join(new_doc))
